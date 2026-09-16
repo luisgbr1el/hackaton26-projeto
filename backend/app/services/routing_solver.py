@@ -120,6 +120,7 @@ class VehicleRouteResult:
         return {
             "vehicle_id": self.vehicle.id,
             "vehicle_name": self.vehicle.name,
+            "license_plate": getattr(self.vehicle, "license_plate", "CRA-0000"),
             "color": self.vehicle.color,
             "hex_color": self.vehicle.hex_color,
             "emoji": self.vehicle.emoji,

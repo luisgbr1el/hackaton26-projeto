@@ -23,9 +23,16 @@ async def get_fleet() -> List[VehicleConfig]:
     response_model=PreviewResponse,
     status_code=status.HTTP_200_OK,
     summary="Pré-visualização e Diagnóstico do CSV de Pedidos",
-    description="Lê o arquivo CSV, separa pedidos de RETIRADA, quantifica tipos de entrega e diagnostica o lote antes da otimização.",
+    description=(
+        "Lê o arquivo CSV, permite filtrar por intervalo de datas (start_date e end_date), "
+        "separa pedidos de RETIRADA, quantifica tipos de entrega e diagnostica o lote antes da otimização."
+    ),
 )
-async def preview_csv(file: UploadFile = File(...)) -> PreviewResponse:
+async def preview_csv(
+    file: UploadFile = File(...),
+    start_date: Optional[str] = Form(None),
+    end_date: Optional[str] = Form(None),
+) -> PreviewResponse:
     if not file.filename.endswith((".csv", ".txt")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -37,7 +44,12 @@ async def preview_csv(file: UploadFile = File(...)) -> PreviewResponse:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="O arquivo enviado está vazio.",
         )
-    return routing_service.generate_preview(file.filename, content)
+    return routing_service.generate_preview(
+        file.filename,
+        content,
+        start_date=start_date,
+        end_date=end_date,
+    )
 
 
 @router.post(
@@ -46,14 +58,16 @@ async def preview_csv(file: UploadFile = File(...)) -> PreviewResponse:
     status_code=status.HTTP_200_OK,
     summary="Otimização de Rotas (Google OR-Tools + Resumo Comparativo de Estratégias)",
     description=(
-        "Processa o CSV de pedidos e calcula automaticamente as 5 opções estratégicas de rota "
-        "(recomendada, menor custo, menor tempo, menor peso e menor volume). Retorna um resumo executivo "
-        "enxuto de cada estratégia para decisão do usuário, persistindo os cálculos detalhados no SQLite."
+        "Processa o CSV de pedidos com suporte a filtro de datas (start_date e end_date) e calcula "
+        "automaticamente as 5 opções estratégicas de rota (recomendada, menor custo, menor tempo, menor peso "
+        "e menor volume), recomendando o melhor caminhão para o lote e persistindo os cálculos detalhados no SQLite."
     ),
 )
 async def optimize_routes(
     file: UploadFile = File(...),
     user_prompt: Optional[str] = Form(None),
+    start_date: Optional[str] = Form(None),
+    end_date: Optional[str] = Form(None),
 ) -> OptimizeResponse:
     if not file.filename.endswith((".csv", ".txt")):
         raise HTTPException(
@@ -70,6 +84,8 @@ async def optimize_routes(
         file.filename,
         content,
         user_prompt=user_prompt,
+        start_date=start_date,
+        end_date=end_date,
     )
 
 

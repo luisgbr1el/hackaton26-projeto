@@ -146,20 +146,33 @@ Para cada veículo com entregas alocadas, o sistema calcula:
   - `ALERTA_RESERVA`: Consumo entre 80% e 100% do tanque.
   - `NECESSITA_ABASTECIMENTO`: Consumo > 100% do tanque (exige parada em posto).
 
+### I. 🚚 Recomendação Inteligente do Melhor Caminhão para a Rota (`recommended_truck`)
+Para auxiliar a decisão do operador, o backend analisa as características agregadas do lote de pedidos a despachar e recomenda proativamente o melhor caminhão:
+- **Lógica de Seleção:**
+  - Se for lote estritamente urbano em Crateús até $285\text{ kg} \mid 0,36\text{ m}^3$: recomenda **Moto Titan 160 Start (`CRA-5E05`)**.
+  - Se a carga for intermediária (até $1.530\text{ kg}$ em serra ou $1.615\text{ kg}$ no plano): recomenda os utilitários pequenos **Kia Pequeno (`CRA-3C03`)** ou **HR Pequeno (`CRA-4D04`)**, economizando combustível frente a caminhões médios.
+  - Se a carga for pesada (até $4.320\text{ kg}$ em serra ou $4.560\text{ kg}$ no plano): recomenda os caminhões médios **Accelo Médio 1 (`CRA-1A01`)** ou **Accelo Médio 2 (`CRA-2B02`)**.
+- **Retorno no JSON:** Objeto `recommended_truck` presente tanto no payload de `POST /api/v1/routing/optimize` quanto em `GET /api/v1/routing/summary/{report_id}`, incluindo justificativa técnica textual (`reason`) e taxa de ocupação prevista.
+
+### J. 📅 Filtragem de Pedidos por Intervalo de Datas (`start_date` e `end_date`)
+Permite ao despachante enviar planilhas consolidadas mensais e restringir a análise e a rota apenas aos pedidos de um período determinado (ex: pedidos da semana corrente):
+- Parâmetros opcionais `start_date` e `end_date` nos endpoints `/preview` e `/optimize` (formatos aceitos: `DD/MM/YYYY` ou `YYYY-MM-DD`).
+- Pedidos com data fora da faixa são excluídos do grafo de roteamento e da pesagem de carga.
+- Resposta documenta os metadados em `date_filter_applied` (`total_orders_before_filter`, `orders_retained`, `orders_filtered_out`, `applied`).
 
 ---
 
-## 5. 🚛 Frota Oficial da Empresa: Veículos, Cores, Emojis e Capacidades
+## 5. 🚛 Frota Oficial da Empresa: Veículos, Cores, Emojis, Placas e Capacidades
 
-A frota oficial conta com **5 veículos**, cada um com nome e cor atribuídos para visualização nas rotas do mapa e relatórios:
+A frota oficial conta com **5 veículos**, cada um com nome, placa de simulação, cor e emoji para visualização inequívoca no pátio, nas rotas do mapa e relatórios:
 
-| Emoji | Cor | Código Hex | Nome Oficial do Veículo | Perfil de Operação | Capacidade Nominal | Limite Serra (**90%**) | Limite Urbano (**95%**) |
-| :---: | :---: | :---: | :--- | :--- | :---: | :---: | :---: |
-| 🔵 | **Azul** | `#2563EB` | **Accelo Médio 1** | Médio / Rotas de Interior (Eixo Oeste/Sul) | $4.800\text{ kg} \mid 2,45\text{ m}^3$ | **$4.320\text{ kg} \mid 2,20\text{ m}^3$** | **$4.560\text{ kg} \mid 2,33\text{ m}^3$** |
-| 🔴 | **Vermelho** | `#DC2626` | **Accelo Médio 2** | Médio / Rotas de Interior (Eixo Leste/Serra) | $4.800\text{ kg} \mid 2,45\text{ m}^3$ | **$4.320\text{ kg} \mid 2,20\text{ m}^3$** | **$4.560\text{ kg} \mid 2,33\text{ m}^3$** |
-| 🟢 | **Verde** | `#16A34A` | **Kia Pequeno** | Médio / Cargas Intermediárias e Interior Próximo | $1.700\text{ kg} \mid 2,18\text{ m}^3$ | **$1.530\text{ kg} \mid 1,96\text{ m}^3$** | **$1.615\text{ kg} \mid 2,07\text{ m}^3$** |
-| 🟠 | **Laranja** | `#EA580C` | **HR Pequeno** | Médio / Urgências e Cargas Médias Urbanas | $1.700\text{ kg} \mid 2,18\text{ m}^3$ | **$1.530\text{ kg} \mid 1,96\text{ m}^3$** | **$1.615\text{ kg} \mid 2,07\text{ m}^3$** |
-| 🟡 | **Amarelo** | `#EAB308` | **Moto Titan 160 Start** | Expresso / Ponto das Topics & Urgências Urbanas (Titan 160 Start) | **$300\text{ kg} \mid 0,3833\text{ m}^3$** | *(Não vai para serra)* | **$285\text{ kg} \mid 0,3641\text{ m}^3$** |
+| Emoji | Cor | Código Hex | Placa Simulada | Nome Oficial do Veículo | Perfil de Operação | Capacidade Nominal | Limite Serra (**90%**) | Limite Urbano (**95%**) |
+| :---: | :---: | :---: | :---: | :--- | :--- | :---: | :---: | :---: |
+| 🔵 | **Azul** | `#2563EB` | `CRA-1A01` | **Accelo Médio 1** | Médio / Rotas de Interior (Eixo Oeste/Sul) | $4.800\text{ kg} \mid 2,45\text{ m}^3$ | **$4.320\text{ kg} \mid 2,20\text{ m}^3$** | **$4.560\text{ kg} \mid 2,33\text{ m}^3$** |
+| 🔴 | **Vermelho** | `#DC2626` | `CRA-2B02` | **Accelo Médio 2** | Médio / Rotas de Interior (Eixo Leste/Serra) | $4.800\text{ kg} \mid 2,45\text{ m}^3$ | **$4.320\text{ kg} \mid 2,20\text{ m}^3$** | **$4.560\text{ kg} \mid 2,33\text{ m}^3$** |
+| 🟢 | **Verde** | `#16A34A` | `CRA-3C03` | **Kia Pequeno** | Médio / Cargas Intermediárias e Interior Próximo | $1.700\text{ kg} \mid 2,18\text{ m}^3$ | **$1.530\text{ kg} \mid 1,96\text{ m}^3$** | **$1.615\text{ kg} \mid 2,07\text{ m}^3$** |
+| 🟠 | **Laranja** | `#EA580C` | `CRA-4D04` | **HR Pequeno** | Médio / Urgências e Cargas Médias Urbanas | $1.700\text{ kg} \mid 2,18\text{ m}^3$ | **$1.530\text{ kg} \mid 1,96\text{ m}^3$** | **$1.615\text{ kg} \mid 2,07\text{ m}^3$** |
+| 🟡 | **Amarelo** | `#EAB308` | `CRA-5E05` | **Moto Titan 160 Start** | Expresso / Ponto das Topics & Urgências Urbanas (Titan 160 Start) | **$300\text{ kg} \mid 0,3833\text{ m}^3$** | *(Não vai para serra)* | **$285\text{ kg} \mid 0,3641\text{ m}^3$** |
 
 ---
 

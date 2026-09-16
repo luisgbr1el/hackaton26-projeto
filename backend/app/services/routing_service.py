@@ -15,6 +15,7 @@ from app.services.routing_solver import (
 )
 from app.services.gemini_service import gemini_service
 from app.db.sqlite import save_report, get_report_by_id
+from datetime import datetime, date
 from app.schemas.routing import (
     PreviewResponse,
     PreviewOrderDTO,
@@ -28,6 +29,8 @@ from app.schemas.routing import (
     LoadingOrderItemDTO,
     VehicleSummaryDTO,
     DefinedRouteStrategyDTO,
+    DateFilterMetadataDTO,
+    RecommendedTruckDTO,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,6 +47,87 @@ def parse_monetary_value(val: Any) -> float:
         return float(val_str)
     except ValueError:
         return 0.0
+
+
+def parse_flexible_date(val: Any) -> Optional[date]:
+    """Parse de strings de data nos formatos brasileiros e internacionais comuns."""
+    if pd.isna(val) or not val:
+        return None
+    val_str = str(val).strip().split(" ")[0].split("T")[0]
+    formats = [
+        "%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y",
+        "%d/%m/%y", "%y-%m-%d", "%d.%m.%Y"
+    ]
+    for fmt in formats:
+        try:
+            return datetime.strptime(val_str, fmt).date()
+        except ValueError:
+            pass
+    return None
+
+
+def apply_date_filter(
+    df: pd.DataFrame,
+    date_col: Optional[str],
+    start_date_str: Optional[str],
+    end_date_str: Optional[str],
+) -> Tuple[pd.DataFrame, DateFilterMetadataDTO]:
+    """
+    Filtra o DataFrame de pedidos entre start_date e end_date inclusive.
+    Retorna o DataFrame filtrado e o DTO com estatísticas do filtro aplicado.
+    """
+    total_before = len(df)
+    parsed_start = parse_flexible_date(start_date_str) if start_date_str else None
+    parsed_end = parse_flexible_date(end_date_str) if end_date_str else None
+
+    if not parsed_start and not parsed_end:
+        return df, DateFilterMetadataDTO(
+            start_date=None,
+            end_date=None,
+            total_orders_before_filter=total_before,
+            orders_retained=total_before,
+            orders_filtered_out=0,
+            applied=False,
+        )
+
+    if not date_col or date_col not in df.columns:
+        return df, DateFilterMetadataDTO(
+            start_date=parsed_start.isoformat() if parsed_start else None,
+            end_date=parsed_end.isoformat() if parsed_end else None,
+            total_orders_before_filter=total_before,
+            orders_retained=total_before,
+            orders_filtered_out=0,
+            applied=False,
+        )
+
+    rows_to_keep = []
+    for idx, row in df.iterrows():
+        row_dt = parse_flexible_date(row[date_col])
+        if row_dt is None:
+            # Sem data identificável na linha: preserva por segurança operacional
+            rows_to_keep.append(True)
+            continue
+        if parsed_start and row_dt < parsed_start:
+            rows_to_keep.append(False)
+            continue
+        if parsed_end and row_dt > parsed_end:
+            rows_to_keep.append(False)
+            continue
+        rows_to_keep.append(True)
+
+    filtered_df = df[rows_to_keep].reset_index(drop=True)
+    retained = len(filtered_df)
+    filtered_out = total_before - retained
+
+    return filtered_df, DateFilterMetadataDTO(
+        start_date=parsed_start.isoformat() if parsed_start else None,
+        end_date=parsed_end.isoformat() if parsed_end else None,
+        total_orders_before_filter=total_before,
+        orders_retained=retained,
+        orders_filtered_out=filtered_out,
+        applied=True,
+    )
+
 
 
 class RoutingService:
@@ -92,9 +176,17 @@ class RoutingService:
             "date": find_col(["DATA", "DATA_PEDIDO"]),
         }
 
-    def generate_preview(self, filename: str, content_bytes: bytes) -> PreviewResponse:
+    def generate_preview(
+        self,
+        filename: str,
+        content_bytes: bytes,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> PreviewResponse:
         df = self.read_csv_to_dataframe(content_bytes)
         cols = self._extract_columns(df)
+
+        df, date_filter_meta = apply_date_filter(df, cols.get("date"), start_date, end_date)
 
         total_orders = len(df)
         pickup_orders = []
@@ -167,7 +259,9 @@ class RoutingService:
             is_mountain_route=is_mountain,
             pickup_orders=pickup_orders[:50],
             sample_orders=delivery_orders[:20],
+            date_filter_applied=date_filter_meta,
         )
+
 
     def optimize_routes(
         self, filename: str, content_bytes: bytes, user_prompt: Optional[str] = None
@@ -280,6 +374,8 @@ class RoutingService:
     def _format_route_dto(
         self,
         route_results: List[VehicleRouteResult],
+        recommended_vehicle_id: Optional[int] = None,
+        recommendation_reason: Optional[str] = None,
     ) -> Tuple[List[VehicleRouteDTO], str, float, float]:
         full_manifest_parts = []
         routes_dto_list: List[VehicleRouteDTO] = []
@@ -301,6 +397,7 @@ class RoutingService:
                 for s in r.stops
             ]
 
+            plate = getattr(r.vehicle, "license_plate", "CRA-0000")
             manifest_md = gemini_service.generate_operational_manifest(
                 vehicle_name=r.vehicle.name,
                 emoji=r.vehicle.emoji,
@@ -312,6 +409,7 @@ class RoutingService:
                 stops_summary=stops_summary,
                 has_topics=r.has_topics,
                 has_urgent=r.has_urgent,
+                license_plate=plate,
             )
             r.manifest_markdown = manifest_md
             full_manifest_parts.append(manifest_md)
@@ -321,13 +419,19 @@ class RoutingService:
                 total_fuel_l += fuel_dto.estimated_consumption_liters
                 total_fuel_cost += fuel_dto.estimated_cost_reais
 
+            is_rec = (r.vehicle.id == recommended_vehicle_id) if recommended_vehicle_id is not None else False
+            rec_reason = recommendation_reason if is_rec else None
+
             routes_dto_list.append(
                 VehicleRouteDTO(
                     vehicle_id=r.vehicle.id,
                     vehicle_name=r.vehicle.name,
+                    license_plate=plate,
                     color=r.vehicle.color,
                     hex_color=r.vehicle.hex_color,
                     emoji=r.vehicle.emoji,
+                    is_recommended=is_rec,
+                    recommendation_reason=rec_reason,
                     total_distance_km=round(r.total_distance_km, 2),
                     total_weight_kg=round(r.total_weight_kg, 2),
                     total_volume_m3=round(r.total_volume_m3, 3),
@@ -377,9 +481,14 @@ class RoutingService:
         filename: str,
         content_bytes: bytes,
         user_prompt: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> OptimizeResponse:
         df = self.read_csv_to_dataframe(content_bytes)
         cols = self._extract_columns(df)
+
+        # 0. Aplicar filtro de intervalo de datas (se fornecido pelo usuário)
+        df, date_filter_meta = apply_date_filter(df, cols.get("date"), start_date, end_date)
 
         orders_to_route: List[DeliveryOrder] = []
         pickup_orders: List[Dict[str, Any]] = []
@@ -449,19 +558,32 @@ class RoutingService:
 
         is_mountain = geocoding_service.is_mountain_region(list(cities_in_batch))
 
-        # 2. Extract constraints and vehicle allocations via Gemini Service / NLP
+        # 2. Avaliar melhor caminhão recomendado com base no peso e características do lote
+        total_batch_w = sum(o.weight_kg for o in orders_to_route)
+        total_batch_v = sum(o.volume_m3 for o in orders_to_route)
+        all_intra = all(o.is_intra_city for o in orders_to_route) if orders_to_route else False
+
+        rec_truck_dict = fleet_service.recommend_best_truck(
+            total_weight_kg=total_batch_w,
+            total_volume_m3=total_batch_v,
+            is_mountain=is_mountain,
+            intra_city_only=all_intra,
+        )
+        rec_truck_dto = RecommendedTruckDTO(**rec_truck_dict)
+
+        # 3. Extract constraints and vehicle allocations via Gemini Service / NLP
         llm_config = gemini_service.parse_dispatch_prompt(
             user_prompt=user_prompt or "",
             cities_in_batch=list(cities_in_batch),
         )
 
-        # 3. Active fleet selection
+        # 4. Active fleet selection
         if is_mountain:
             active_vehicles = [v for v in OFFICIAL_FLEET if v.operates_in_mountain]
         else:
             active_vehicles = list(OFFICIAL_FLEET)
 
-        # 4. Build rich nodes list & distance matrix
+        # 5. Build rich nodes list & distance matrix
         depot_node = {
             "lat": HUB_CRATEUS["lat"],
             "lon": HUB_CRATEUS["lon"],
@@ -481,7 +603,7 @@ class RoutingService:
 
         distance_matrix, duration_matrix = geocoding_service.build_distance_matrix(all_nodes)
 
-        # 5. Executar solucionador para as 5 estratégias em lote (uma única vez)
+        # 6. Executar solucionador para as 5 estratégias em lote (uma única vez)
         all_strategy_results = routing_solver.solve_all_strategies(
             orders=orders_to_route,
             active_vehicles=active_vehicles,
@@ -529,14 +651,18 @@ class RoutingService:
         for sm in strategy_meta:
             s_id = sm["id"]
             strat_routes, strat_unassigned = all_strategy_results.get(s_id, all_strategy_results["recomendada"])
-            dto_list, manifest_md, fuel_l, fuel_cost = self._format_route_dto(strat_routes)
+            dto_list, manifest_md, fuel_l, fuel_cost = self._format_route_dto(
+                strat_routes,
+                recommended_vehicle_id=rec_truck_dto.vehicle_id,
+                recommendation_reason=rec_truck_dto.reason,
+            )
 
             s_tot_dist = sum(r.total_distance_km for r in dto_list)
             s_tot_weight = sum(r.total_weight_kg for r in dto_list)
             s_tot_vol = sum(r.total_volume_m3 for r in dto_list)
             s_tot_val = sum(sum(st.value_reais for st in r.stops) for r in dto_list)
             s_time_hours = round(s_tot_dist / 45.0, 1)  # Estimativa média 45 km/h operacional
-            s_vehicles = [f"{r.emoji} {r.vehicle_name}" for r in dto_list]
+            s_vehicles = [f"{r.emoji} {r.vehicle_name} ({r.license_plate})" for r in dto_list]
             s_stops_count = sum(len(r.stops) for r in dto_list)
 
             # Resumo executivo leve para retorno no JSON do optimize
@@ -583,6 +709,8 @@ class RoutingService:
                 "total_fuel_cost": fuel_cost,
                 "vehicles_used": s_vehicles,
                 "unassigned_orders": unassigned_list,
+                "recommended_truck": rec_truck_dict,
+                "date_filter_applied": date_filter_meta.model_dump() if date_filter_meta else None,
             }
 
         default_strat = strategies_storage_data["recomendada"]
@@ -590,7 +718,7 @@ class RoutingService:
         strategies_json_str = json.dumps(strategies_storage_data, ensure_ascii=False)
         vehicles_used_names = default_strat["vehicles_used"]
 
-        # 6. Persistir no SQLite reports.db (armazena as 5 estratégias completas)
+        # 7. Persistir no SQLite reports.db (armazena as 5 estratégias completas)
         report_id = save_report(
             filename=filename,
             user_prompt=user_prompt,
@@ -607,13 +735,15 @@ class RoutingService:
             report_id=report_id,
             filename=filename,
             user_prompt=user_prompt,
-            total_orders_processed=len(df),
-            total_orders_routed=strategies_summary_list[0].stops_count,
+            total_orders_processed=date_filter_meta.total_orders_before_filter if date_filter_meta else len(df),
+            total_orders_routed=strategies_summary_list[0].stops_count if strategies_summary_list else 0,
             total_pickup_orders=len(pickup_orders),
             total_unassigned_orders=len(default_strat["unassigned_orders"]),
             is_mountain_route=is_mountain,
             safety_factor_label="90% (Serra / Longa Distância)" if is_mountain else "95% (Plano / Urbano)",
             strategies_summary=strategies_summary_list,
+            recommended_truck=rec_truck_dto,
+            date_filter_applied=date_filter_meta,
             pickup_orders=pickup_orders,
             unassigned_orders=default_strat["unassigned_orders"],
             reasoning=llm_config.get("reasoning"),
@@ -625,7 +755,9 @@ class RoutingService:
         """
         Recupera instantaneamente os dados consolidados da estratégia escolhida no SQLite (sem reprocessar OR-Tools):
         - valor total, peso total, volume total, distância total e ocupação (%);
-        - caminhão selecionado com capacidades e status de combustível;
+        - melhor caminhão recomendado tecnicamente com placa simulada;
+        - dados de filtragem por intervalo de datas se aplicados;
+        - veículos selecionados com capacidades, placas e status de combustível;
         - rota definida (recomendada, menor custo, menor tempo, menor peso, menor volume);
         - ordem de carregamento física LIFO (fundo à porta do baú);
         - rotas com GeoJSON e manifesto Markdown para desenhar no mapa e gerar o PDF no front.
@@ -654,13 +786,14 @@ class RoutingService:
         manifest_md = ""
         tot_dist = float(rep["total_distance_km"])
         tot_weight = float(rep["total_weight_kg"])
+        target_strat = {}
 
         # Verificar se as 5 estratégias estão serializadas no SQLite
         strategies_json = rep["strategies_data_json"] if "strategies_data_json" in rep.keys() and rep["strategies_data_json"] else None
         if strategies_json:
             try:
                 all_strats = json.loads(strategies_json)
-                target_strat = all_strats.get(strategy_clean) or all_strats.get("recomendada")
+                target_strat = all_strats.get(strategy_clean) or all_strats.get("recomendada") or {}
                 if target_strat:
                     routes_data = target_strat.get("routes", [])
                     manifest_md = target_strat.get("manifest_markdown", "")
@@ -681,6 +814,19 @@ class RoutingService:
         tot_fuel_l_all = 0.0
         tot_fuel_cost_all = 0.0
         tot_capacity_kg_all = 0
+
+        # Recuperar caminhão recomendado salvo ou calcular dinamicamente
+        rec_truck_dict = target_strat.get("recommended_truck") if target_strat else None
+        if not rec_truck_dict:
+            rec_truck_dict = fleet_service.recommend_best_truck(
+                total_weight_kg=tot_weight,
+                total_volume_m3=sum(float(r.get("total_volume_m3", 0.0)) for r in routes_data),
+                is_mountain=False,
+            )
+        rec_truck_dto = RecommendedTruckDTO(**rec_truck_dict) if rec_truck_dict else None
+
+        saved_date_filter = target_strat.get("date_filter_applied") if target_strat else None
+        date_filter_dto = DateFilterMetadataDTO(**saved_date_filter) if saved_date_filter else None
 
         for r in routes_data:
             try:
@@ -724,13 +870,22 @@ class RoutingService:
             eff_cap = int(r.get("effective_capacity_kg", 1))
             tot_capacity_kg_all += eff_cap
 
+            vid = r.get("vehicle_id", 0)
+            v_conf = fleet_service.get_vehicle_by_id(vid)
+            v_plate = r.get("license_plate") or (v_conf.license_plate if v_conf else "CRA-0000")
+            is_rec = bool(r.get("is_recommended", False) or (vid == getattr(rec_truck_dto, "vehicle_id", -1)))
+            rec_reason = r.get("recommendation_reason") or (rec_truck_dto.reason if is_rec and rec_truck_dto else None)
+
             vehicles_summary.append(
                 VehicleSummaryDTO(
-                    vehicle_id=r.get("vehicle_id", 0),
+                    vehicle_id=vid,
                     vehicle_name=r.get("vehicle_name", "Veículo"),
+                    license_plate=v_plate,
                     color=r.get("color", "Azul"),
                     hex_color=r.get("hex_color", "#2563EB"),
                     emoji=r.get("emoji", "🚚"),
+                    is_recommended=is_rec,
+                    recommendation_reason=rec_reason,
                     effective_capacity_kg=eff_cap,
                     effective_capacity_m3=float(r.get("effective_capacity_m3", 0.0)),
                     safety_factor_label=r.get("safety_factor_label", "95%"),
@@ -760,11 +915,14 @@ class RoutingService:
             vehicles_count=len(vehicles_summary),
             vehicles=vehicles_summary,
             all_loading_orders=all_loading_orders,
+            recommended_truck=rec_truck_dto,
+            date_filter_applied=date_filter_dto,
             total_fuel_liters=round(tot_fuel_l_all, 2),
             total_fuel_cost_reais=round(tot_fuel_cost_all, 2),
             manifest_markdown=manifest_md,
             routes=detailed_routes_dto if detailed_routes_dto else None,
         )
+
 
 
 routing_service = RoutingService()

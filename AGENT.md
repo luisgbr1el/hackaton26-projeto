@@ -58,15 +58,17 @@ Sua missão é manter, evoluir e garantir a integridade de um sistema que:
 
 ---
 
-### E. Frota Oficial da Empresa (Cores e Emojis)
+### E. Frota Oficial da Empresa (Cores, Emojis e Placas de Simulação)
 
-| Emoji | Cor | Código Hex | Nome Oficial do Veículo | Capacidade Nominal | Limite Serra (**90%**) | Limite Urbano (**95%**) | Perfil de Operação |
-| :---: | :---: | :---: | :--- | :---: | :---: | :---: | :--- |
-| 🔵 | **Azul** | `#2563EB` | **Accelo Médio 1** | $4.800\text{ kg} \mid 2,45\text{ m}^3$ | **$4.320\text{ kg}$** | **$4.560\text{ kg}$** | Médio / Interior (Eixo Oeste/Sul) |
-| 🔴 | **Vermelho** | `#DC2626` | **Accelo Médio 2** | $4.800\text{ kg} \mid 2,45\text{ m}^3$ | **$4.320\text{ kg}$** | **$4.560\text{ kg}$** | Médio / Interior (Eixo Leste/Serra) |
-| 🟢 | **Verde** | `#16A34A` | **Kia Pequeno** | $1.700\text{ kg} \mid 2,18\text{ m}^3$ | **$1.530\text{ kg}$** | **$1.615\text{ kg}$** | Médio / Cargas Intermediárias |
-| 🟠 | **Laranja** | `#EA580C` | **HR Pequeno** | $1.700\text{ kg} \mid 2,18\text{ m}^3$ | **$1.530\text{ kg}$** | **$1.615\text{ kg}$** | Médio / Cargas Médias e Urbanas |
-| 🟡 | **Amarelo** | `#EAB308` | **Moto Titan 160 Start** | **$300\text{ kg} \mid 0,3833\text{ m}^3$** | *(Não vai para serra)* | **$285\text{ kg}$** | Expresso / Ponto das Topics & Crateús urbano (Titan 160 Start) |
+Para evitar qualquer ambiguidade operacional no pátio e na expedição (especialmente entre os dois caminhões médios do mesmo modelo e entre os utilitários pequenos), cada veículo possui uma **placa de simulação padronizada** além de sua cor e emoji:
+
+| Emoji | Cor | Código Hex | Placa Simulada | Nome Oficial do Veículo | Capacidade Nominal | Limite Serra (**90%**) | Limite Urbano (**95%**) | Perfil de Operação |
+| :---: | :---: | :---: | :---: | :--- | :---: | :---: | :---: | :--- |
+| 🔵 | **Azul** | `#2563EB` | `CRA-1A01` | **Accelo Médio 1** | $4.800\text{ kg} \mid 2,45\text{ m}^3$ | **$4.320\text{ kg}$** | **$4.560\text{ kg}$** | Médio / Interior (Eixo Oeste/Sul) |
+| 🔴 | **Vermelho** | `#DC2626` | `CRA-2B02` | **Accelo Médio 2** | $4.800\text{ kg} \mid 2,45\text{ m}^3$ | **$4.320\text{ kg}$** | **$4.560\text{ kg}$** | Médio / Interior (Eixo Leste/Serra) |
+| 🟢 | **Verde** | `#16A34A` | `CRA-3C03` | **Kia Pequeno** | $1.700\text{ kg} \mid 2,18\text{ m}^3$ | **$1.530\text{ kg}$** | **$1.615\text{ kg}$** | Médio / Cargas Intermediárias |
+| 🟠 | **Laranja** | `#EA580C` | `CRA-4D04` | **HR Pequeno** | $1.700\text{ kg} \mid 2,18\text{ m}^3$ | **$1.530\text{ kg}$** | **$1.615\text{ kg}$** | Médio / Cargas Médias e Urbanas |
+| 🟡 | **Amarelo** | `#EAB308` | `CRA-5E05` | **Moto Titan 160 Start** | **$300\text{ kg} \mid 0,3833\text{ m}^3$** | *(Não vai para serra)* | **$285\text{ kg}$** | Expresso / Ponto das Topics & Crateús urbano (Titan 160 Start) |
 
 ---
 
@@ -107,15 +109,16 @@ O sistema resolve simultaneamente 5 variações operacionais para que a lideran�
 ### I. Fluxo de Decisão em 2 Etapas (Payload Leve e Zero Reprocessamento)
 Para evitar que o despachante precise adivinhar qual estratégia deseja antes de ver o impacto nos custos e tempos, o sistema adota um fluxo de decisão em 2 etapas:
 1. **Etapa 1 — `POST /api/v1/routing/optimize` (Sem campo `strategy`):**
-   - Recebe apenas o arquivo CSV (`file`) e opcionalmente o prompt do operador (`user_prompt`).
+   - Recebe apenas o arquivo CSV (`file`) e opcionalmente o prompt do operador (`user_prompt`), além de datas opcionais (`start_date`, `end_date`).
    - O Google OR-Tools calcula e resolve as 5 estratégias em lote uma única vez.
    - Os resultados completos de todas as 5 estratégias são serializados e persistidos no SQLite (`reports.db`).
-   - O retorno HTTP é um **payload leve e enxuto** contendo o `report_id` e o array `strategies_summary` com os 5 cards comparativos (km total, horas estimadas, litros de combustível, custo em R$, quantidade de veículos e paradas).
+   - O retorno HTTP é um **payload leve e enxuto** contendo o `report_id`, o objeto `recommended_truck`, os metadados do filtro de data e o array `strategies_summary` com os 5 cards comparativos.
 2. **Etapa 2 — `GET /api/v1/routing/summary/{report_id}?strategy={strategy_id}` (Detalhamento Sob Demanda):**
    - O operador compara os 5 cards na tela e clica na estratégia de sua preferência (ex: *Menor Custo*).
    - O backend **não executa o OR-Tools novamente**: busca instantaneamente no SQLite os dados calculados da estratégia escolhida.
    - Retorna o JSON estruturado completo contendo:
      - Dados consolidados para geração e renderização do PDF no frontend (valor total, peso, volume, distância, ocupação segura e veículos).
+     - Objeto `recommended_truck` com a indicação do veículo ideal.
      - Informações detalhadas de abastecimento e autonomia de combustível.
      - Sequência de paradas e tabela com a **ordem física de carregamento LIFO** (do fundo à porta do baú).
      - Traçado GeoJSON de cada rota para renderização no mapa Leaflet.
@@ -129,6 +132,25 @@ Cada veículo da frota possui especificações de capacidade de tanque, consumo 
   - `SUFICIENTE`: A rota consome menos de 80% da capacidade total do tanque.
   - `ALERTA_RESERVA`: O percurso consumirá entre 80% e 100% da autonomia máxima.
   - `NECESSITA_ABASTECIMENTO`: A distância excede a capacidade do tanque completo, exigindo parada para reabastecimento.
+
+---
+
+### K. 🚚 Recomendação Inteligente do Melhor Caminhão para a Rota (`recommended_truck`)
+O motor de análise avalia a demanda consolidada do lote (peso total em kg, volume em m³, presença de serras e raio de operação) e recomenda de forma proativa o melhor veículo da frota:
+- **Critérios de Seleção:**
+  - **Moto Titan 160 Start (`CRA-5E05`):** Cargas leves até 285 kg em percursos estritamente urbanos em Crateús ou transporte de urgência ao Ponto das Topics. Não opera em serra.
+  - **Kia Pequeno (`CRA-3C03`) / HR Pequeno (`CRA-4D04`):** Cargas intermediárias até 1.530 kg (serra) ou 1.615 kg (plano), oferecendo menor consumo de diesel que caminhões pesados.
+  - **Accelo Médio 1 (`CRA-1A01`) ou Accelo Médio 2 (`CRA-2B02`):** Cargas pesadas até 4.320 kg (serra) ou 4.560 kg (plano), ideais para lotes consolidados intermunicipais de grande porte.
+- **Campos Retornados no JSON:** `vehicle_id`, `vehicle_name`, `license_plate`, `color`, `hex_color`, `emoji`, `effective_capacity_kg`, `effective_capacity_m3`, `total_batch_weight_kg`, `total_batch_volume_m3`, `estimated_occupancy_percent` e `reason` (justificativa técnica).
+
+---
+
+### L. 📅 Filtragem de Pedidos por Intervalo de Datas (`start_date` e `end_date`)
+Permite ao operador fazer upload de planilhas mensais ou consolidadas e restringir a otimização apenas à janela de interesse operacional (ex: apenas a semana atual ou dias pendentes):
+- **Parâmetros Opcionais:** `start_date` e `end_date` nos endpoints `POST /api/v1/routing/preview` e `POST /api/v1/routing/optimize`.
+- **Formatos Suportados:** `DD/MM/YYYY` (padrão brasileiro do CSV, ex: `01/08/2026`) ou ISO `YYYY-MM-DD`.
+- **Comportamento:** Pedidos fora do período informado são desconsiderados antes da roteirização e do dimensionamento da carga.
+- **Metadados Retornados:** `date_filter_applied` contendo `start_date`, `end_date`, `total_orders_before_filter`, `orders_retained`, `orders_filtered_out` e flag `applied`.
 
 
 ---

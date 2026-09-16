@@ -15,6 +15,30 @@ class PreviewOrderDTO(BaseModel):
     route_type: str = "POLO_LOCALIDADE"
 
 
+class DateFilterMetadataDTO(BaseModel):
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    total_orders_before_filter: int
+    orders_retained: int
+    orders_filtered_out: int
+    applied: bool = False
+
+
+class RecommendedTruckDTO(BaseModel):
+    vehicle_id: int
+    vehicle_name: str
+    license_plate: str
+    color: str
+    hex_color: str
+    emoji: str
+    effective_capacity_kg: int
+    effective_capacity_m3: float
+    total_batch_weight_kg: float
+    total_batch_volume_m3: float
+    estimated_occupancy_percent: float
+    reason: str
+
+
 class PreviewResponse(BaseModel):
     filename: str
     total_orders: int
@@ -26,6 +50,7 @@ class PreviewResponse(BaseModel):
     is_mountain_route: bool
     pickup_orders: List[Dict[str, Any]]
     sample_orders: List[PreviewOrderDTO]
+    date_filter_applied: Optional[DateFilterMetadataDTO] = None
 
 
 class RouteStopDTO(BaseModel):
@@ -64,9 +89,12 @@ class VehicleFuelDTO(BaseModel):
 class VehicleRouteDTO(BaseModel):
     vehicle_id: int
     vehicle_name: str
+    license_plate: str = "CRA-0000"
     color: str
     hex_color: str
     emoji: str
+    is_recommended: bool = False
+    recommendation_reason: Optional[str] = None
     total_distance_km: float
     total_weight_kg: float
     total_volume_m3: float
@@ -131,6 +159,8 @@ class OptimizeResponse(BaseModel):
     is_mountain_route: bool
     safety_factor_label: str
     strategies_summary: List[StrategySummaryCardDTO]
+    recommended_truck: Optional[RecommendedTruckDTO] = None
+    date_filter_applied: Optional[DateFilterMetadataDTO] = None
     pickup_orders: List[Dict[str, Any]] = []
     unassigned_orders: List[Dict[str, Any]] = []
     reasoning: Optional[str] = None
@@ -153,9 +183,12 @@ class LoadingOrderItemDTO(BaseModel):
 class VehicleSummaryDTO(BaseModel):
     vehicle_id: int
     vehicle_name: str
+    license_plate: str = "CRA-0000"
     color: str
     hex_color: str
     emoji: str
+    is_recommended: bool = False
+    recommendation_reason: Optional[str] = None
     effective_capacity_kg: int
     effective_capacity_m3: float
     safety_factor_label: str
@@ -188,9 +221,12 @@ class DispatchSummaryResponse(BaseModel):
     vehicles_count: int
     vehicles: List[VehicleSummaryDTO]
     all_loading_orders: List[LoadingOrderItemDTO]
+    recommended_truck: Optional[RecommendedTruckDTO] = None
+    date_filter_applied: Optional[DateFilterMetadataDTO] = None
     total_fuel_liters: float
     total_fuel_cost_reais: float
     manifest_markdown: Optional[str] = None
     routes: Optional[List[VehicleRouteDTO]] = None
+
 
 

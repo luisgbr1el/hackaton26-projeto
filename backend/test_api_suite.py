@@ -370,6 +370,113 @@ class TestAPIProductionSuite(unittest.TestCase):
         self.assertGreater(summary["total_fuel_liters"], 0.0)
         self.assertGreater(summary["total_fuel_cost_reais"], 0.0)
 
+    def test_12_simulated_license_plates(self):
+        """
+        Valida que cada veículo da frota oficial possui sua placa de simulação
+        padronizada (CRA-X0Y) para identificação inequívoca no pátio e na expedição.
+        """
+        res = self.client.get("/api/v1/routing/fleet")
+        self.assertEqual(res.status_code, 200)
+        fleet = res.json()
+        self.assertEqual(len(fleet), 5)
+
+        expected_plates = {
+            "Accelo Médio 1": "CRA-1A01",
+            "Accelo Médio 2": "CRA-2B02",
+            "Kia Pequeno": "CRA-3C03",
+            "HR Pequeno": "CRA-4D04",
+            "Moto Titan 160 Start": "CRA-5E05",
+        }
+
+        for v in fleet:
+            self.assertIn("license_plate", v)
+            self.assertTrue(v["license_plate"].startswith("CRA-"))
+            self.assertEqual(v["license_plate"], expected_plates[v["name"]])
+
+    def test_13_recommended_truck_logic(self):
+        """
+        Valida que o backend calcula e retorna o melhor caminhão recomendado
+        para a rota com base em peso total, volume, topografia e perfil do lote.
+        """
+        csv_sample = (
+            "Pedido;Data;Vendedor;Situacao;Cidade;Logistica;Situacao_CSV_Entrega;Valor_Pedido;Qtd_Itens;Itens_Resumo;Endereco\n"
+            "P401;02/08/2026;V1;Faturado;CRATEUS;ENTREGUE;NORMAL;R$ 800,00;2;CIMENTO POTY TODAS OBRAS 50KG (10 UN);Centro\n"
+            "P402;02/08/2026;V1;Faturado;IPAPORANGA;ENTREGUE;NORMAL;R$ 1200,00;2;CIMENTO POTY TODAS OBRAS 50KG (15 UN);Centro\n"
+        )
+        res = self.client.post(
+            "/api/v1/routing/optimize",
+            files={"file": ("rec_truck.csv", csv_sample.encode("utf-8"), "text/csv")},
+            data={"user_prompt": "Identificar melhor caminhão"},
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+
+        # Validar recommended_truck no optimize
+        self.assertIn("recommended_truck", data)
+        rec = data["recommended_truck"]
+        self.assertIsNotNone(rec)
+        self.assertIn("vehicle_name", rec)
+        self.assertIn("license_plate", rec)
+        self.assertTrue(rec["license_plate"].startswith("CRA-"))
+        self.assertIn("effective_capacity_kg", rec)
+        self.assertIn("effective_capacity_m3", rec)
+        self.assertIn("estimated_occupancy_percent", rec)
+        self.assertIn("reason", rec)
+        self.assertGreater(rec["estimated_occupancy_percent"], 0.0)
+
+        # Validar no summary
+        rep_id = data["report_id"]
+        sum_res = self.client.get(f"/api/v1/routing/summary/{rep_id}")
+        self.assertEqual(sum_res.status_code, 200)
+        sum_data = sum_res.json()
+        self.assertIn("recommended_truck", sum_data)
+        self.assertEqual(sum_data["recommended_truck"]["license_plate"], rec["license_plate"])
+
+    def test_14_date_range_filtering(self):
+        """
+        Valida que os parâmetros start_date e end_date filtram corretamente
+        pedidos fora da janela temporal selecionada (ex: semana atual vs mês inteiro).
+        """
+        # CSV com 4 pedidos em datas distintas de Agosto/2026
+        csv_monthly = (
+            "Pedido;Data;Vendedor;Situacao;Cidade;Logistica;Situacao_CSV_Entrega;Valor_Pedido;Qtd_Itens;Itens_Resumo\n"
+            "P_W1_1;01/08/2026;V1;Faturado;CRATEUS;ENTREGUE;NORMAL;R$ 300,00;1;PROD A (5 UN)\n"
+            "P_W1_2;03/08/2026;V1;Faturado;CRATEUS;ENTREGUE;NORMAL;R$ 400,00;1;PROD B (5 UN)\n"
+            "P_W2_1;10/08/2026;V1;Faturado;IPAPORANGA;ENTREGUE;NORMAL;R$ 500,00;1;PROD C (5 UN)\n"
+            "P_W3_1;20/08/2026;V1;Faturado;TAMBORIL;ENTREGUE;NORMAL;R$ 600,00;1;PROD D (5 UN)\n"
+        )
+
+        # 1. Preview com filtro para a primeira semana (01/08 a 07/08)
+        prev_res = self.client.post(
+            "/api/v1/routing/preview",
+            files={"file": ("mensal.csv", csv_monthly.encode("utf-8"), "text/csv")},
+            data={"start_date": "01/08/2026", "end_date": "07/08/2026"},
+        )
+        self.assertEqual(prev_res.status_code, 200)
+        prev_data = prev_res.json()
+        self.assertEqual(prev_data["total_orders"], 2)
+        self.assertIn("date_filter_applied", prev_data)
+        date_meta = prev_data["date_filter_applied"]
+        self.assertIsNotNone(date_meta)
+        self.assertTrue(date_meta["applied"])
+        self.assertEqual(date_meta["total_orders_before_filter"], 4)
+        self.assertEqual(date_meta["orders_retained"], 2)
+        self.assertEqual(date_meta["orders_filtered_out"], 2)
+
+        # 2. Optimize com o mesmo filtro de datas
+        opt_res = self.client.post(
+            "/api/v1/routing/optimize",
+            files={"file": ("mensal.csv", csv_monthly.encode("utf-8"), "text/csv")},
+            data={"start_date": "01/08/2026", "end_date": "07/08/2026"},
+        )
+        self.assertEqual(opt_res.status_code, 200)
+        opt_data = opt_res.json()
+        self.assertIn("date_filter_applied", opt_data)
+        self.assertTrue(opt_data["date_filter_applied"]["applied"])
+        self.assertEqual(opt_data["date_filter_applied"]["orders_retained"], 2)
+        self.assertEqual(opt_data["date_filter_applied"]["orders_filtered_out"], 2)
+        self.assertEqual(opt_data["total_orders_routed"], 2)
+
 
 if __name__ == "__main__":
     unittest.main()

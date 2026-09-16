@@ -152,15 +152,17 @@ Responda ESTRITAMENTE com um objeto JSON válido (sem texto antes ou depois):
         stops_summary: List[Dict[str, Any]],
         has_topics: bool = False,
         has_urgent: bool = False,
+        license_plate: str = "",
     ) -> str:
         """
         Gera o Manifesto Operacional do Motorista em Markdown formatado.
         """
+        plate_str = f" | Placa: {license_plate}" if license_plate else ""
         fallback_manifest = f"""
 # {emoji} MANIFESTO DE CARGA — ROTA {color.upper()} ({vehicle_name})
 
 **Data do Despacho:** Hoje  
-**Veículo:** {vehicle_name} ({color})  
+**Veículo:** {vehicle_name} ({color}{plate_str})  
 **Distância Prevista:** {total_distance_km:.1f} km  
 **Carga Total Transportada:** {total_weight_kg:.1f} kg / {effective_capacity_kg} kg ({safety_factor})  
 

@@ -8,6 +8,7 @@ class VehicleConfig(BaseModel):
     color: str
     hex_color: str
     emoji: str
+    license_plate: str = "CRA-0000"
     nominal_weight_kg: int
     nominal_volume_m3: float
     serra_weight_kg: int
@@ -82,6 +83,7 @@ OFFICIAL_FLEET: List[VehicleConfig] = [
         color="Azul",
         hex_color="#2563EB",
         emoji="🔵",
+        license_plate="CRA-1A01",
         nominal_weight_kg=4800,
         nominal_volume_m3=2.45,
         serra_weight_kg=4320,
@@ -101,6 +103,7 @@ OFFICIAL_FLEET: List[VehicleConfig] = [
         color="Vermelho",
         hex_color="#DC2626",
         emoji="🔴",
+        license_plate="CRA-2B02",
         nominal_weight_kg=4800,
         nominal_volume_m3=2.45,
         serra_weight_kg=4320,
@@ -120,6 +123,7 @@ OFFICIAL_FLEET: List[VehicleConfig] = [
         color="Verde",
         hex_color="#16A34A",
         emoji="🟢",
+        license_plate="CRA-3C03",
         nominal_weight_kg=1700,
         nominal_volume_m3=2.18,
         serra_weight_kg=1530,
@@ -139,6 +143,7 @@ OFFICIAL_FLEET: List[VehicleConfig] = [
         color="Laranja",
         hex_color="#EA580C",
         emoji="🟠",
+        license_plate="CRA-4D04",
         nominal_weight_kg=1700,
         nominal_volume_m3=2.18,
         serra_weight_kg=1530,
@@ -158,6 +163,7 @@ OFFICIAL_FLEET: List[VehicleConfig] = [
         color="Amarelo",
         hex_color="#EAB308",
         emoji="🟡",
+        license_plate="CRA-5E05",
         nominal_weight_kg=300,
         nominal_volume_m3=0.3833,
         serra_weight_kg=0,
@@ -216,5 +222,93 @@ class FleetService:
             }
         return capacities
 
+    def recommend_best_truck(
+        self,
+        total_weight_kg: float,
+        total_volume_m3: float,
+        is_mountain: bool,
+        intra_city_only: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Determina e justifica tecnicamente qual o melhor caminhão recomendado para o lote
+        com base no peso total, volume cúbico, topografia (serra) e eficiência de combustível.
+        """
+        eligible = [v for v in self.fleet if (v.operates_in_mountain or not is_mountain)]
+
+        # Caso Moto: apenas se for perímetro urbano plano, carga leve (<= 285 kg) e volume <= 0.36 m³
+        if not is_mountain and intra_city_only and total_weight_kg <= 285 and total_volume_m3 <= 0.36:
+            moto = next(v for v in self.fleet if v.id == 4)
+            occ = round((total_weight_kg / 285) * 100, 1) if 285 > 0 else 0.0
+            return {
+                "vehicle_id": moto.id,
+                "vehicle_name": moto.name,
+                "license_plate": moto.license_plate,
+                "color": moto.color,
+                "hex_color": moto.hex_color,
+                "emoji": moto.emoji,
+                "effective_capacity_kg": 285,
+                "effective_capacity_m3": 0.364,
+                "total_batch_weight_kg": round(total_weight_kg, 2),
+                "total_batch_volume_m3": round(total_volume_m3, 3),
+                "estimated_occupancy_percent": occ,
+                "reason": (
+                    f"Moto Titan 160 Start ({moto.license_plate}) é a melhor recomendação para este lote: "
+                    f"carga leve de {total_weight_kg:.1f} kg (ocupação de {occ:.1f}% do limite de 285 kg) "
+                    f"em perímetro urbano plano de Crateús, proporcionando máxima agilidade e consumo recorde de 38 km/l."
+                ),
+            }
+
+        # Veículos pequenos (Kia / HR): capacidade efetiva 1.530 kg (serra) ou 1.615 kg (plano)
+        small_limit_kg = 1530 if is_mountain else 1615
+        small_limit_vol = 1.96 if is_mountain else 2.07
+
+        if total_weight_kg <= small_limit_kg and total_volume_m3 <= small_limit_vol:
+            chosen = next((v for v in eligible if v.id in [2, 3]), eligible[0])
+            occ = round((total_weight_kg / small_limit_kg) * 100, 1) if small_limit_kg > 0 else 0.0
+            return {
+                "vehicle_id": chosen.id,
+                "vehicle_name": chosen.name,
+                "license_plate": chosen.license_plate,
+                "color": chosen.color,
+                "hex_color": chosen.hex_color,
+                "emoji": chosen.emoji,
+                "effective_capacity_kg": small_limit_kg,
+                "effective_capacity_m3": small_limit_vol,
+                "total_batch_weight_kg": round(total_weight_kg, 2),
+                "total_batch_volume_m3": round(total_volume_m3, 3),
+                "estimated_occupancy_percent": occ,
+                "reason": (
+                    f"{chosen.name} ({chosen.license_plate}) é o caminhão mais recomendado: a carga de {total_weight_kg:.1f} kg "
+                    f"ocupa {occ:.1f}% da capacidade segura ({small_limit_kg} kg{' com teto de 90% para serra' if is_mountain else ''}), "
+                    f"garantindo excelente economia de diesel ({chosen.fuel_consumption_kml} km/l vs 4.2 km/l do caminhão médio) "
+                    f"sem desperdício de tonelagem ociosa."
+                ),
+            }
+
+        # Cargas médias e pesadas (> 1.530 kg ou > 1.96 m³): Caminhões Accelo Médio
+        med_limit_kg = 4320 if is_mountain else 4560
+        med_limit_vol = 2.20 if is_mountain else 2.33
+        accelo = next((v for v in eligible if v.id in [0, 1]), eligible[0])
+        occ = round((total_weight_kg / med_limit_kg) * 100, 1) if med_limit_kg > 0 else 0.0
+        return {
+            "vehicle_id": accelo.id,
+            "vehicle_name": accelo.name,
+            "license_plate": accelo.license_plate,
+            "color": accelo.color,
+            "hex_color": accelo.hex_color,
+            "emoji": accelo.emoji,
+            "effective_capacity_kg": med_limit_kg,
+            "effective_capacity_m3": med_limit_vol,
+            "total_batch_weight_kg": round(total_weight_kg, 2),
+            "total_batch_volume_m3": round(total_volume_m3, 3),
+            "estimated_occupancy_percent": min(100.0, occ),
+            "reason": (
+                f"{accelo.name} ({accelo.license_plate}) é o caminhão mais recomendado: a carga total de {total_weight_kg:.1f} kg "
+                f"excede o limite seguro dos veículos leves ({small_limit_kg} kg), exigindo a robustez de chassis, freios "
+                f"e capacidade de carga do Accelo Médio (teto seguro de {med_limit_kg} kg{' com margem de 90% para serra' if is_mountain else ''})."
+            ),
+        }
+
 
 fleet_service = FleetService()
+
