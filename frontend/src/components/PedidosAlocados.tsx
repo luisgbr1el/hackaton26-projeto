@@ -1,6 +1,6 @@
 import React from 'react';
 import type { PedidoAlocado } from '../types';
-import { formatMoeda, formatNumero } from '../utils/format';
+import { formatMoeda, formatNumero, formatVolumeDetalhado } from '../utils/format';
 
 interface PedidosAlocadosProps {
   pedidos: PedidoAlocado[];
@@ -55,7 +55,7 @@ export const PedidosAlocados: React.FC<PedidosAlocadosProps> = ({
                 </td>
                 <td className="num">{formatMoeda(pedido.valor)}</td>
                 <td className="num">{formatNumero(pedido.pesoKg)} kg</td>
-                <td className="num">{formatNumero(pedido.volumeM3, 1)} m³</td>
+                <td className="num">{formatVolumeDetalhado(pedido.volumeM3)}</td>
               </tr>
             ))}
           </tbody>

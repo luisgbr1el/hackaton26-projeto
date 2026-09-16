@@ -15,6 +15,15 @@ export const formatPeso = (kg: number): string => `${formatNumero(kg)} kg`;
 
 export const formatVolume = (m3: number): string => `${formatNumero(m3, 2)} m³`;
 
+/** Para tabelas de pedidos: mostra mínimo 2, máximo 4 casas, evitando "0,0" para volumes pequenos. */
+export const formatVolumeDetalhado = (m3: number): string => {
+  const s = new Intl.NumberFormat('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 4,
+  }).format(m3);
+  return `${s} m³`;
+};
+
 export const formatPercentual = (valor: number): string =>
   `${formatNumero(valor, 1)}%`;
 
