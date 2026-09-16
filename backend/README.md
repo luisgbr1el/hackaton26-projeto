@@ -16,6 +16,11 @@ backend/
 │   ├── schemas/                # Schemas de validação de entrada/saída (Pydantic)
 │   ├── services/               # Camada de regras de negócio
 │   └── main.py                 # Instância FastAPI, middlewares CORS e ciclo de vida
+├── data/                       # Arquivos e datasets para treinamento futuro
+│   ├── pedidos/                # Pedidos semanais anonimizados
+│   ├── logistica_entregas/     # Vendas, entregas, faturamento e coletas
+│   ├── produtos_materiais/     # Ranking de materiais, pesos e volumes
+│   └── documentos_amostras/    # PDFs anonimizados para OCR/extração
 ├── .env.example                # Exemplo de configuração de ambiente
 ├── requirements.txt            # Dependências Python
 └── main.py                     # Ponto de entrada direto

@@ -15,6 +15,7 @@ hackaton26-backend/
 │   │   ├── schemas/            # Validação de dados (Pydantic v2)
 │   │   ├── services/           # Regras de negócio
 │   │   └── main.py             # Instância do FastAPI e middlewares (CORS)
+│   ├── data/                   # Datasets organizados para treinamento futuro
 │   ├── requirements.txt        # Dependências do backend
 │   └── .env.example            # Variáveis de ambiente do backend
 │
