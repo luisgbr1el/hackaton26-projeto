@@ -14,13 +14,20 @@ from app.services.routing_solver import (
     VehicleRouteResult,
 )
 from app.services.gemini_service import gemini_service
-from app.db.sqlite import save_report
+from app.db.sqlite import save_report, get_report_by_id
 from app.schemas.routing import (
     PreviewResponse,
     PreviewOrderDTO,
     OptimizeResponse,
+    StrategySummaryCardDTO,
     VehicleRouteDTO,
     RouteStopDTO,
+    VehicleFuelDTO,
+    RouteOptionDTO,
+    DispatchSummaryResponse,
+    LoadingOrderItemDTO,
+    VehicleSummaryDTO,
+    DefinedRouteStrategyDTO,
 )
 
 logger = logging.getLogger(__name__)
@@ -270,22 +277,14 @@ class RoutingService:
 
         distance_matrix, duration_matrix = geocoding_service.build_distance_matrix(all_nodes)
 
-        # 5. Run OR-Tools CVRP Solver
-        route_results, unassigned = routing_solver.solve(
-            orders=orders_to_route,
-            active_vehicles=active_vehicles,
-            distance_matrix=distance_matrix,
-            is_mountain=is_mountain,
-            time_limit_seconds=5,
-        )
-
-        # 6. Generate Manifests and Format Results
-        total_distance = sum(r.total_distance_km for r in route_results)
-        total_weight = sum(r.total_weight_kg for r in route_results)
-        vehicles_used_names = [f"{r.vehicle.emoji} {r.vehicle.name}" for r in route_results]
-
+    def _format_route_dto(
+        self,
+        route_results: List[VehicleRouteResult],
+    ) -> Tuple[List[VehicleRouteDTO], str, float, float]:
         full_manifest_parts = []
         routes_dto_list: List[VehicleRouteDTO] = []
+        total_fuel_l = 0.0
+        total_fuel_cost = 0.0
 
         for r in route_results:
             stops_summary = [
@@ -317,6 +316,11 @@ class RoutingService:
             r.manifest_markdown = manifest_md
             full_manifest_parts.append(manifest_md)
 
+            fuel_dto = VehicleFuelDTO(**r.fuel_info) if r.fuel_info else None
+            if fuel_dto:
+                total_fuel_l += fuel_dto.estimated_consumption_liters
+                total_fuel_cost += fuel_dto.estimated_cost_reais
+
             routes_dto_list.append(
                 VehicleRouteDTO(
                     vehicle_id=r.vehicle.id,
@@ -337,6 +341,7 @@ class RoutingService:
                     stops_count=len(r.stops),
                     intra_city_stops_count=r.intra_city_stops_count,
                     inter_city_stops_count=r.inter_city_stops_count,
+                    fuel_info=fuel_dto,
                     stops=[
                         RouteStopDTO(
                             stop_number=s.stop_number,
@@ -365,56 +370,400 @@ class RoutingService:
             )
 
         combined_manifest = "\n\n---\n\n".join(full_manifest_parts)
-        routes_json_str = json.dumps([r.model_dump() for r in routes_dto_list], ensure_ascii=False)
+        return routes_dto_list, combined_manifest, round(total_fuel_l, 2), round(total_fuel_cost, 2)
 
-        # 7. Persist to SQLite reports.db
+    def optimize_routes(
+        self,
+        filename: str,
+        content_bytes: bytes,
+        user_prompt: Optional[str] = None,
+    ) -> OptimizeResponse:
+        df = self.read_csv_to_dataframe(content_bytes)
+        cols = self._extract_columns(df)
+
+        orders_to_route: List[DeliveryOrder] = []
+        pickup_orders: List[Dict[str, Any]] = []
+        cities_in_batch = set()
+
+        # 1. Parse rows and filter RETIRADA
+        for idx, row in df.iterrows():
+            order_id = str(row[cols["order_id"]]).strip() if cols["order_id"] else f"PED-{idx+1}"
+            raw_city = str(row[cols["city"]]).strip() if cols["city"] and not pd.isna(row[cols["city"]]) else "CRATEUS"
+            raw_address = str(row[cols["address"]]).strip() if cols.get("address") and not pd.isna(row[cols["address"]]) else ""
+            raw_type = str(row[cols["delivery_type"]]).strip().upper() if cols["delivery_type"] and not pd.isna(row[cols["delivery_type"]]) else "NORMAL"
+            val = parse_monetary_value(row[cols["value"]]) if cols["value"] else 0.0
+            qty = int(row[cols["qty"]]) if cols["qty"] and not pd.isna(row[cols["qty"]]) and str(row[cols["qty"]]).isdigit() else 1
+            items_str = str(row[cols["items"]]) if cols["items"] and not pd.isna(row[cols["items"]]) else ""
+            date_str = str(row[cols["date"]]).strip() if cols["date"] and not pd.isna(row[cols["date"]]) else ""
+
+            dtype = "NORMAL"
+            if "RETIRADA" in raw_type:
+                dtype = "RETIRADA"
+            elif "URGENTE" in raw_type:
+                dtype = "URGENTE"
+            elif "TOPIC" in raw_type or "TOPIQUE" in raw_type:
+                dtype = "TOPIC"
+            elif "PROGRAMADO" in raw_type:
+                dtype = "PROGRAMADO"
+
+            loc_res = geocoding_service.resolve_location(
+                city_raw=raw_city,
+                address_raw=raw_address,
+                delivery_type=dtype,
+                order_index=idx,
+            )
+
+            cities_in_batch.add(loc_res.base_city)
+            weight, volume = catalog_service.estimate_order_metrics(items_str, qtd_itens=qty)
+
+            if dtype == "RETIRADA":
+                pickup_orders.append({
+                    "order_id": order_id,
+                    "city": loc_res.base_city,
+                    "address": loc_res.address,
+                    "delivery_type": dtype,
+                    "weight_kg": weight,
+                    "volume_m3": volume,
+                    "value_reais": round(val, 2),
+                    "items_summary": items_str,
+                })
+                continue
+
+            orders_to_route.append(
+                DeliveryOrder(
+                    order_id=order_id,
+                    city=loc_res.base_city,
+                    delivery_type=dtype,
+                    weight_kg=weight,
+                    volume_m3=volume,
+                    value_reais=val,
+                    items_summary=items_str,
+                    lat=loc_res.lat,
+                    lon=loc_res.lon,
+                    date_str=date_str,
+                    address=loc_res.address,
+                    is_intra_city=loc_res.is_intra_city,
+                    route_type=loc_res.route_type,
+                )
+            )
+
+        is_mountain = geocoding_service.is_mountain_region(list(cities_in_batch))
+
+        # 2. Extract constraints and vehicle allocations via Gemini Service / NLP
+        llm_config = gemini_service.parse_dispatch_prompt(
+            user_prompt=user_prompt or "",
+            cities_in_batch=list(cities_in_batch),
+        )
+
+        # 3. Active fleet selection
+        if is_mountain:
+            active_vehicles = [v for v in OFFICIAL_FLEET if v.operates_in_mountain]
+        else:
+            active_vehicles = list(OFFICIAL_FLEET)
+
+        # 4. Build rich nodes list & distance matrix
+        depot_node = {
+            "lat": HUB_CRATEUS["lat"],
+            "lon": HUB_CRATEUS["lon"],
+            "base_city": "CRATEUS",
+            "is_intra_city": False,
+            "address": "Centro de Distribuição (Crateús)",
+        }
+        all_nodes = [depot_node]
+        for o in orders_to_route:
+            all_nodes.append({
+                "lat": o.lat,
+                "lon": o.lon,
+                "base_city": o.city,
+                "is_intra_city": o.is_intra_city,
+                "address": o.address,
+            })
+
+        distance_matrix, duration_matrix = geocoding_service.build_distance_matrix(all_nodes)
+
+        # 5. Executar solucionador para as 5 estratégias em lote (uma única vez)
+        all_strategy_results = routing_solver.solve_all_strategies(
+            orders=orders_to_route,
+            active_vehicles=active_vehicles,
+            distance_matrix=distance_matrix,
+            is_mountain=is_mountain,
+            time_limit_per_strategy_seconds=2,
+        )
+
+        strategy_meta = [
+            {
+                "id": "recomendada",
+                "name": "Melhor Rota (Recomendada)",
+                "description": "Balanço ótimo multiobjetivo entre menores distâncias, janelas prioritárias de SLA e limites seguros de carga.",
+                "badge": "Equilibrada",
+            },
+            {
+                "id": "menor_custo",
+                "name": "Menor Custo",
+                "description": "Otimização focada no menor custo financeiro total em R$ (combustível e custo operacional por km rodado).",
+                "badge": "Mais Econômica",
+            },
+            {
+                "id": "menor_tempo",
+                "name": "Menor Tempo",
+                "description": "Otimização focada na máxima agilidade, menor tempo em trânsito e equilíbrio da jornada de entregas.",
+                "badge": "Mais Rápida",
+            },
+            {
+                "id": "menor_peso",
+                "name": "Menor Peso",
+                "description": "Distribuição suave e homogênea de peso entre os veículos para menor esforço mecânico em aclives e serras.",
+                "badge": "Carga Leve",
+            },
+            {
+                "id": "menor_volume",
+                "name": "Menor Volume",
+                "description": "Otimização de compacidade volumétrica (m³) e melhor aproveitamento de espaço do baú.",
+                "badge": "Mais Compacta",
+            },
+        ]
+
+        strategies_summary_list: List[StrategySummaryCardDTO] = []
+        strategies_storage_data: Dict[str, Any] = {}
+
+        for sm in strategy_meta:
+            s_id = sm["id"]
+            strat_routes, strat_unassigned = all_strategy_results.get(s_id, all_strategy_results["recomendada"])
+            dto_list, manifest_md, fuel_l, fuel_cost = self._format_route_dto(strat_routes)
+
+            s_tot_dist = sum(r.total_distance_km for r in dto_list)
+            s_tot_weight = sum(r.total_weight_kg for r in dto_list)
+            s_tot_vol = sum(r.total_volume_m3 for r in dto_list)
+            s_tot_val = sum(sum(st.value_reais for st in r.stops) for r in dto_list)
+            s_time_hours = round(s_tot_dist / 45.0, 1)  # Estimativa média 45 km/h operacional
+            s_vehicles = [f"{r.emoji} {r.vehicle_name}" for r in dto_list]
+            s_stops_count = sum(len(r.stops) for r in dto_list)
+
+            # Resumo executivo leve para retorno no JSON do optimize
+            strategies_summary_list.append(
+                StrategySummaryCardDTO(
+                    strategy_id=s_id,
+                    strategy_name=sm["name"],
+                    badge_label=sm["badge"],
+                    description=sm["description"],
+                    total_distance_km=round(s_tot_dist, 2),
+                    total_time_hours=s_time_hours,
+                    total_weight_kg=round(s_tot_weight, 2),
+                    total_volume_m3=round(s_tot_vol, 3),
+                    total_value_reais=round(s_tot_val, 2),
+                    total_fuel_liters=fuel_l,
+                    total_fuel_cost_reais=fuel_cost,
+                    vehicles_used=s_vehicles,
+                    stops_count=s_stops_count,
+                )
+            )
+
+            # Armazenamento estruturado no SQLite para recuperação instantânea sob demanda
+            unassigned_list = [
+                {
+                    "order_id": u.order_id,
+                    "city": u.city,
+                    "address": u.address,
+                    "delivery_type": u.delivery_type,
+                    "weight_kg": u.weight_kg,
+                    "value_reais": u.value_reais,
+                    "items_summary": u.items_summary,
+                }
+                for u in strat_unassigned
+            ]
+
+            strategies_storage_data[s_id] = {
+                "routes": [r.model_dump() for r in dto_list],
+                "manifest_markdown": manifest_md,
+                "total_dist": s_tot_dist,
+                "total_weight": s_tot_weight,
+                "total_vol": s_tot_vol,
+                "total_val": s_tot_val,
+                "total_fuel_l": fuel_l,
+                "total_fuel_cost": fuel_cost,
+                "vehicles_used": s_vehicles,
+                "unassigned_orders": unassigned_list,
+            }
+
+        default_strat = strategies_storage_data["recomendada"]
+        routes_json_str = json.dumps(default_strat["routes"], ensure_ascii=False)
+        strategies_json_str = json.dumps(strategies_storage_data, ensure_ascii=False)
+        vehicles_used_names = default_strat["vehicles_used"]
+
+        # 6. Persistir no SQLite reports.db (armazena as 5 estratégias completas)
         report_id = save_report(
             filename=filename,
             user_prompt=user_prompt,
             total_orders=len(orders_to_route),
-            total_weight_kg=total_weight,
-            total_distance_km=total_distance,
-            manifest_markdown=combined_manifest,
+            total_weight_kg=default_strat["total_weight"],
+            total_distance_km=default_strat["total_dist"],
+            manifest_markdown=default_strat["manifest_markdown"],
             routes_json=routes_json_str,
             vehicles_used=", ".join(vehicles_used_names),
+            strategies_data_json=strategies_json_str,
         )
-
-        unassigned_dto = [
-            {
-                "order_id": u.order_id,
-                "city": u.city,
-                "address": u.address,
-                "delivery_type": u.delivery_type,
-                "weight_kg": u.weight_kg,
-                "value_reais": u.value_reais,
-                "items_summary": u.items_summary,
-            }
-            for u in unassigned
-        ]
-
-        total_intra = sum(r.intra_city_stops_count for r in route_results)
-        total_inter = sum(r.inter_city_stops_count for r in route_results)
 
         return OptimizeResponse(
             report_id=report_id,
             filename=filename,
             user_prompt=user_prompt,
             total_orders_processed=len(df),
-            total_orders_routed=sum(len(r.stops) for r in route_results),
+            total_orders_routed=strategies_summary_list[0].stops_count,
             total_pickup_orders=len(pickup_orders),
-            total_unassigned_orders=len(unassigned),
-            total_distance_km=round(total_distance, 2),
-            total_weight_kg=round(total_weight, 2),
+            total_unassigned_orders=len(default_strat["unassigned_orders"]),
             is_mountain_route=is_mountain,
             safety_factor_label="90% (Serra / Longa Distância)" if is_mountain else "95% (Plano / Urbano)",
-            vehicles_used=vehicles_used_names,
-            total_intra_city_stops=total_intra,
-            total_inter_city_stops=total_inter,
-            routes=routes_dto_list,
+            strategies_summary=strategies_summary_list,
             pickup_orders=pickup_orders,
-            unassigned_orders=unassigned_dto,
-            manifest_markdown=combined_manifest,
+            unassigned_orders=default_strat["unassigned_orders"],
             reasoning=llm_config.get("reasoning"),
+        )
+
+    def get_dispatch_summary(
+        self, report_id: int, strategy: Optional[str] = "recomendada"
+    ) -> DispatchSummaryResponse:
+        """
+        Recupera instantaneamente os dados consolidados da estratégia escolhida no SQLite (sem reprocessar OR-Tools):
+        - valor total, peso total, volume total, distância total e ocupação (%);
+        - caminhão selecionado com capacidades e status de combustível;
+        - rota definida (recomendada, menor custo, menor tempo, menor peso, menor volume);
+        - ordem de carregamento física LIFO (fundo à porta do baú);
+        - rotas com GeoJSON e manifesto Markdown para desenhar no mapa e gerar o PDF no front.
+        """
+        rep = get_report_by_id(report_id)
+        if not rep:
+            raise HTTPException(status_code=404, detail=f"Relatório de ID {report_id} não encontrado.")
+
+        strategy_clean = (strategy or "recomendada").lower().strip().replace("-", "_")
+        strategy_info = {
+            "recomendada": ("Melhor Rota (Recomendada)", "Equilibrada", "Balanço ótimo multiobjetivo entre menores distâncias, janelas prioritárias de SLA e limites seguros de carga."),
+            "menor_custo": ("Menor Custo", "Mais Econômica", "Otimização focada no menor custo financeiro total em R$ (combustível e custo operacional por km rodado)."),
+            "menor_tempo": ("Menor Tempo", "Mais Rápida", "Otimização focada na máxima agilidade, menor tempo em trânsito e equilíbrio da jornada de entregas."),
+            "menor_peso": ("Menor Peso", "Carga Leve", "Distribuição suave e homogênea de peso entre os veículos para menor esforço mecânico em aclives e serras."),
+            "menor_volume": ("Menor Volume", "Mais Compacta", "Otimização de compacidade volumétrica (m³) e melhor aproveitamento de espaço do baú."),
+        }
+        strat_name, strat_badge, strat_desc = strategy_info.get(strategy_clean, strategy_info["recomendada"])
+        defined_route = DefinedRouteStrategyDTO(
+            strategy_id=strategy_clean,
+            strategy_name=strat_name,
+            badge_label=strat_badge,
+            description=strat_desc,
+        )
+
+        routes_data = []
+        manifest_md = ""
+        tot_dist = float(rep["total_distance_km"])
+        tot_weight = float(rep["total_weight_kg"])
+
+        # Verificar se as 5 estratégias estão serializadas no SQLite
+        strategies_json = rep["strategies_data_json"] if "strategies_data_json" in rep.keys() and rep["strategies_data_json"] else None
+        if strategies_json:
+            try:
+                all_strats = json.loads(strategies_json)
+                target_strat = all_strats.get(strategy_clean) or all_strats.get("recomendada")
+                if target_strat:
+                    routes_data = target_strat.get("routes", [])
+                    manifest_md = target_strat.get("manifest_markdown", "")
+                    tot_dist = float(target_strat.get("total_dist", tot_dist))
+                    tot_weight = float(target_strat.get("total_weight", tot_weight))
+            except Exception as e:
+                logger.warning(f"Erro ao deserializar strategies_data_json: {e}")
+
+        # Fallback para rota legada em routes_json
+        if not routes_data and rep.get("routes_json"):
+            routes_data = json.loads(rep["routes_json"])
+            manifest_md = rep.get("manifest_markdown", "")
+
+        vehicles_summary: List[VehicleSummaryDTO] = []
+        all_loading_orders: List[LoadingOrderItemDTO] = []
+        detailed_routes_dto: List[VehicleRouteDTO] = []
+        tot_val_all = 0.0
+        tot_fuel_l_all = 0.0
+        tot_fuel_cost_all = 0.0
+        tot_capacity_kg_all = 0
+
+        for r in routes_data:
+            try:
+                detailed_routes_dto.append(VehicleRouteDTO(**r))
+            except Exception:
+                pass
+
+            v_stops = r.get("stops", [])
+            sorted_stops = sorted(v_stops, key=lambda s: s.get("loading_order_position", 999))
+
+            v_loading_items: List[LoadingOrderItemDTO] = []
+            v_tot_val = 0.0
+
+            for s in sorted_stops:
+                val = float(s.get("value_reais", 0.0))
+                v_tot_val += val
+                tot_val_all += val
+
+                item_dto = LoadingOrderItemDTO(
+                    loading_order_position=s.get("loading_order_position", 1),
+                    loading_order_label=s.get("loading_order_label", f"{s.get('loading_order_position', 1)}º a carregar"),
+                    stop_number=s.get("stop_number", 1),
+                    order_id=s.get("order_id", ""),
+                    city=s.get("city", "CRATEUS"),
+                    address=s.get("address"),
+                    delivery_type=s.get("delivery_type", "NORMAL"),
+                    weight_kg=float(s.get("weight_kg", 0.0)),
+                    volume_m3=float(s.get("volume_m3", 0.0)),
+                    value_reais=val,
+                    items_summary=s.get("items_summary", ""),
+                )
+                v_loading_items.append(item_dto)
+                all_loading_orders.append(item_dto)
+
+            fuel_dict = r.get("fuel_info")
+            fuel_dto = VehicleFuelDTO(**fuel_dict) if fuel_dict else None
+            if fuel_dto:
+                tot_fuel_l_all += fuel_dto.estimated_consumption_liters
+                tot_fuel_cost_all += fuel_dto.estimated_cost_reais
+
+            eff_cap = int(r.get("effective_capacity_kg", 1))
+            tot_capacity_kg_all += eff_cap
+
+            vehicles_summary.append(
+                VehicleSummaryDTO(
+                    vehicle_id=r.get("vehicle_id", 0),
+                    vehicle_name=r.get("vehicle_name", "Veículo"),
+                    color=r.get("color", "Azul"),
+                    hex_color=r.get("hex_color", "#2563EB"),
+                    emoji=r.get("emoji", "🚚"),
+                    effective_capacity_kg=eff_cap,
+                    effective_capacity_m3=float(r.get("effective_capacity_m3", 0.0)),
+                    safety_factor_label=r.get("safety_factor_label", "95%"),
+                    total_weight_kg=float(r.get("total_weight_kg", 0.0)),
+                    total_volume_m3=float(r.get("total_volume_m3", 0.0)),
+                    total_value_reais=round(v_tot_val, 2),
+                    occupancy_rate_percent=float(r.get("occupancy_rate_percent", 0.0)),
+                    total_distance_km=float(r.get("total_distance_km", 0.0)),
+                    stops_count=len(v_stops),
+                    fuel_info=fuel_dto,
+                    loading_order=v_loading_items,
+                )
+            )
+
+        tot_vol = sum(v.total_volume_m3 for v in vehicles_summary)
+        overall_occ = round((tot_weight / tot_capacity_kg_all * 100.0), 1) if tot_capacity_kg_all > 0 else 0.0
+
+        return DispatchSummaryResponse(
+            report_id=report_id,
+            filename=rep["filename"],
+            total_value_reais=round(tot_val_all, 2),
+            total_weight_kg=round(tot_weight, 2),
+            total_volume_m3=round(tot_vol, 3),
+            total_distance_km=round(tot_dist, 2),
+            overall_occupancy_rate_percent=overall_occ,
+            defined_route=defined_route,
+            vehicles_count=len(vehicles_summary),
+            vehicles=vehicles_summary,
+            all_loading_orders=all_loading_orders,
+            total_fuel_liters=round(tot_fuel_l_all, 2),
+            total_fuel_cost_reais=round(tot_fuel_cost_all, 2),
+            manifest_markdown=manifest_md,
+            routes=detailed_routes_dto if detailed_routes_dto else None,
         )
 
 

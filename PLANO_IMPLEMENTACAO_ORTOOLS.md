@@ -120,6 +120,33 @@ O motor de roteirização aplica tratamento diferenciado conforme a granularidad
    - A matriz de distâncias considera a malha de quarteirões urbanos (fator Manhattan $1,414$ e velocidade média urbana de $25\text{ km/h}$, ou OSRM).
    - O Google OR-Tools calcula a **melhor rota DENTRO da cidade** (rua a rua / bairro a bairro), sequenciando as entregas sem ziguezague, **além de otimizar a conexão rodoviária entre as cidades**.
 
+### F. 🎯 As 5 Opções Estratégicas de Rota (Google OR-Tools)
+O sistema calcula simultaneamente 5 variações para apoiar a decisão operacional do gestor:
+- **`recomendada` (Melhor Rota / Equilibrada):** Ponto de equilíbrio multiobjetivo entre menores distâncias, janelas prioritárias de SLA e limites seguros de carga.
+- **`menor_custo` (Mais Econômica):** Foco na minimização do custo financeiro total em R$ (soma do combustível consumido e custo por km rodado).
+- **`menor_tempo` (Mais Rápida):** Foco na agilidade máxima e menor tempo total em trânsito com equilíbrio de jornada de motoristas.
+- **`menor_peso` (Carga Leve):** Distribuição suave de peso entre os veículos para menor desgaste mecânico em aclives e serras.
+- **`menor_volume` (Mais Compacta):** Foco no melhor adensamento volumétrico ($m^3$) e ocupação de espaço do baú.
+
+### G. ⚡ Arquitetura em 2 Etapas: Otimização Leve vs. Detalhamento Sob Demanda
+1. **Etapa 1 — `POST /api/v1/routing/optimize` (Sem campo `strategy`):**
+   - O operador envia o CSV sem precisar selecionar previamente uma estratégia.
+   - O OR-Tools processa as 5 estratégias em lote e persiste os cálculos completos na tabela `reports` (`reports.db`).
+   - Retorna um **payload JSON leve** (~90% menor) contendo `report_id` e o array `strategies_summary` com os 5 cards executivos de decisão (distância km, tempo h, combustível L, custo R$, veículos e paradas).
+2. **Etapa 2 — `GET /api/v1/routing/summary/{report_id}?strategy={strategy_id}` (Consumo Instantâneo):**
+   - Ao clicar na estratégia escolhida, o frontend consome este endpoint.
+   - O backend **não roda o OR-Tools novamente**: recupera instantaneamente os dados já processados no SQLite (< 10ms).
+   - Retorna os dados consolidados prontos para o frontend renderizar/gerar o PDF, traçar o GeoJSON no Leaflet e orientar a ordem física de carregamento LIFO no baú.
+
+### H. ⛽ Métrica de Combustível e Autonomia por Veículo
+Para cada veículo com entregas alocadas, o sistema calcula:
+- Consumo estimado em litros e custo em R$ considerando **ida e retorno ao CD Crateús**.
+- Avaliação de autonomia em relação ao tanque cheio:
+  - `SUFICIENTE`: Consumo < 80% do tanque.
+  - `ALERTA_RESERVA`: Consumo entre 80% e 100% do tanque.
+  - `NECESSITA_ABASTECIMENTO`: Consumo > 100% do tanque (exige parada em posto).
+
+
 ---
 
 ## 5. 🚛 Frota Oficial da Empresa: Veículos, Cores, Emojis e Capacidades

@@ -26,9 +26,15 @@ def init_db() -> None:
                 total_distance_km REAL NOT NULL,
                 manifest_markdown TEXT NOT NULL,
                 routes_json TEXT NOT NULL,
-                vehicles_used TEXT NOT NULL
+                vehicles_used TEXT NOT NULL,
+                strategies_data_json TEXT
             );
         """)
+        # Migração transparente se a coluna ainda não existia
+        cursor.execute("PRAGMA table_info(reports);")
+        cols = [row["name"] for row in cursor.fetchall()]
+        if "strategies_data_json" not in cols:
+            cursor.execute("ALTER TABLE reports ADD COLUMN strategies_data_json TEXT;")
         conn.commit()
 
 
@@ -41,6 +47,7 @@ def save_report(
     manifest_markdown: str,
     routes_json: str,
     vehicles_used: str,
+    strategies_data_json: Optional[str] = None,
 ) -> int:
     with get_db_connection() as conn:
         cursor = conn.cursor()
@@ -53,8 +60,9 @@ def save_report(
                 total_distance_km,
                 manifest_markdown,
                 routes_json,
-                vehicles_used
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                vehicles_used,
+                strategies_data_json
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             filename,
             user_prompt or "",
@@ -64,6 +72,7 @@ def save_report(
             manifest_markdown,
             routes_json,
             vehicles_used,
+            strategies_data_json or "",
         ))
         conn.commit()
         return cursor.lastrowid

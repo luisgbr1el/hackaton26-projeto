@@ -94,6 +94,45 @@ O motor de geocodificação e o solucionador OR-Tools aplicam inteligência espa
 
 ---
 
+### H. As 5 Estratégias de Otimização e Despacho
+O sistema resolve simultaneamente 5 variações operacionais para que a liderança de logística escolha a que melhor atende à necessidade do momento:
+1. **`recomendada` (Melhor Rota / Equilibrada):** Balanço ótimo multiobjetivo entre menores distâncias, janelas prioritárias de SLA e limites seguros de carga.
+2. **`menor_custo` (Mais Econômica):** Foco na minimização do custo financeiro total em R$ (soma do combustível gasto e depreciação/custo operacional por quilômetro rodado).
+3. **`menor_tempo` (Mais Rápida):** Foco na máxima velocidade de ciclo, minimizando o tempo total em trânsito e equilibrando as jornadas entre motoristas.
+4. **`menor_peso` (Carga Leve):** Distribuição equilibrada e suave de peso entre os veículos para minimizar o esforço mecânico em aclives, serras e estradas não pavimentadas.
+5. **`menor_volume` (Mais Compacta):** Foco em densidade volumétrica ($m^3$) e compacidade da carga no baú.
+
+---
+
+### I. Fluxo de Decisão em 2 Etapas (Payload Leve e Zero Reprocessamento)
+Para evitar que o despachante precise adivinhar qual estratégia deseja antes de ver o impacto nos custos e tempos, o sistema adota um fluxo de decisão em 2 etapas:
+1. **Etapa 1 — `POST /api/v1/routing/optimize` (Sem campo `strategy`):**
+   - Recebe apenas o arquivo CSV (`file`) e opcionalmente o prompt do operador (`user_prompt`).
+   - O Google OR-Tools calcula e resolve as 5 estratégias em lote uma única vez.
+   - Os resultados completos de todas as 5 estratégias são serializados e persistidos no SQLite (`reports.db`).
+   - O retorno HTTP é um **payload leve e enxuto** contendo o `report_id` e o array `strategies_summary` com os 5 cards comparativos (km total, horas estimadas, litros de combustível, custo em R$, quantidade de veículos e paradas).
+2. **Etapa 2 — `GET /api/v1/routing/summary/{report_id}?strategy={strategy_id}` (Detalhamento Sob Demanda):**
+   - O operador compara os 5 cards na tela e clica na estratégia de sua preferência (ex: *Menor Custo*).
+   - O backend **não executa o OR-Tools novamente**: busca instantaneamente no SQLite os dados calculados da estratégia escolhida.
+   - Retorna o JSON estruturado completo contendo:
+     - Dados consolidados para geração e renderização do PDF no frontend (valor total, peso, volume, distância, ocupação segura e veículos).
+     - Informações detalhadas de abastecimento e autonomia de combustível.
+     - Sequência de paradas e tabela com a **ordem física de carregamento LIFO** (do fundo à porta do baú).
+     - Traçado GeoJSON de cada rota para renderização no mapa Leaflet.
+
+---
+
+### J. Gestão de Autonomia e Consumo de Combustível
+Cada veículo da frota possui especificações de capacidade de tanque, consumo médio (km/l) e tipo de combustível:
+- O sistema calcula o consumo previsto em litros e o custo em R$ considerando o **percurso completo de ida e volta ao Centro de Distribuição em Crateús**.
+- Retorna o status de autonomia:
+  - `SUFICIENTE`: A rota consome menos de 80% da capacidade total do tanque.
+  - `ALERTA_RESERVA`: O percurso consumirá entre 80% e 100% da autonomia máxima.
+  - `NECESSITA_ABASTECIMENTO`: A distância excede a capacidade do tanque completo, exigindo parada para reabastecimento.
+
+
+---
+
 ## 3. 📂 Estrutura e Diagnóstico dos Dados (`backend/data/`)
 
 O agente deve conhecer perfeitamente a estrutura dos datasets de referência para validar qualquer novo upload:

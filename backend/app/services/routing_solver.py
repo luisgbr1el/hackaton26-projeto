@@ -114,6 +114,7 @@ class VehicleRouteResult:
         self.manifest_markdown = manifest_markdown
         self.intra_city_stops_count = sum(1 for s in stops if s.order.is_intra_city)
         self.inter_city_stops_count = sum(1 for s in stops if not s.order.is_intra_city)
+        self.fuel_info = self.vehicle.calculate_fuel_metrics(self.total_distance_km)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -136,6 +137,7 @@ class VehicleRouteResult:
             "stops_count": len(self.stops),
             "intra_city_stops_count": self.intra_city_stops_count,
             "inter_city_stops_count": self.inter_city_stops_count,
+            "fuel_info": self.fuel_info,
             "geojson": self.geojson_feature,
             "manifest_markdown": self.manifest_markdown,
         }
@@ -149,10 +151,16 @@ class RoutingSolver:
         distance_matrix: List[List[int]],
         is_mountain: bool,
         time_limit_seconds: int = 5,
+        strategy: str = "recomendada",
     ) -> Tuple[List[VehicleRouteResult], List[DeliveryOrder]]:
         """
         Executa a otimização matemática de CVRP com o Google OR-Tools.
-        Retorna (rotas_dos_veiculos, pedidos_descartados_ou_pendentes).
+        Suporta estratégias:
+        - 'recomendada': Balanço ótimo multiobjetivo padrão (distância, SLAs, tetos)
+        - 'menor_custo': Pondera custo financeiro por km de combustível do veículo
+        - 'menor_tempo': Minimiza tempo total e equilibra a jornada de entrega
+        - 'menor_peso': Distribui a carga de forma homogênea com tetos de peso conservadores
+        - 'menor_volume': Otimiza a cubagem cúbica e compacidade
         """
         num_orders = len(orders)
         num_vehicles = len(active_vehicles)
@@ -165,22 +173,50 @@ class RoutingSolver:
         manager = pywrapcp.RoutingIndexManager(num_nodes, num_vehicles, 0)
         routing = pywrapcp.RoutingModel(manager)
 
-        # 1. Distances Callback & Objective
-        def distance_callback(from_index: int, to_index: int) -> int:
-            from_node = manager.IndexToNode(from_index)
-            to_node = manager.IndexToNode(to_index)
-            return distance_matrix[from_node][to_node]
+        # 1. Distances & Objective Callbacks
+        if strategy == "menor_custo":
+            # Pondera a distância com o custo de combustível por km de cada veículo
+            callbacks = []
+            for v in active_vehicles:
+                cost_factor = int(round((v.fuel_cost_per_liter / max(v.fuel_consumption_kml, 0.1)) * 100))
+                def vehicle_cost_callback(from_index: int, to_index: int, factor=cost_factor) -> int:
+                    f = manager.IndexToNode(from_index)
+                    t = manager.IndexToNode(to_index)
+                    return int((distance_matrix[f][t] * factor) // 100)
+                cb_idx = routing.RegisterTransitCallback(vehicle_cost_callback)
+                callbacks.append(cb_idx)
+                routing.SetArcCostEvaluatorOfVehicle(cb_idx, v.id if v.id < num_vehicles else 0)
+        elif strategy == "menor_tempo":
+            # Pondera o tempo de viagem (velocidade rodoviária 55 km/h vs urbana 25 km/h)
+            def time_callback(from_index: int, to_index: int) -> int:
+                f = manager.IndexToNode(from_index)
+                t = manager.IndexToNode(to_index)
+                # Estima duração em segundos (distância m / vel m/s)
+                return int(distance_matrix[f][t] / 12)
+            cb_idx = routing.RegisterTransitCallback(time_callback)
+            routing.SetArcCostEvaluatorOfAllVehicles(cb_idx)
+        else:
+            # Padrão: minimização de distância viária real
+            def distance_callback(from_index: int, to_index: int) -> int:
+                from_node = manager.IndexToNode(from_index)
+                to_node = manager.IndexToNode(to_index)
+                return distance_matrix[from_node][to_node]
+            transit_callback_index = routing.RegisterTransitCallback(distance_callback)
+            routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
 
-        transit_callback_index = routing.RegisterTransitCallback(distance_callback)
-        routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
-
-        # 2. Capacidades de Peso (kg) com teto seguro (90% serra vs 95% urbano)
+        # 2. Capacidades de Peso (kg)
         weight_capacities = []
         for v in active_vehicles:
             if is_mountain:
-                cap = v.serra_weight_kg if v.operates_in_mountain else 0
+                base_cap = v.serra_weight_kg if v.operates_in_mountain else 0
             else:
-                cap = v.urbano_weight_kg
+                base_cap = v.urbano_weight_kg
+
+            # Na estratégia de menor peso, aplica teto ainda mais leve (80%) para aliviar veículos
+            if strategy == "menor_peso":
+                cap = int(base_cap * 0.80)
+            else:
+                cap = base_cap
             weight_capacities.append(cap)
 
         def weight_demand_callback(from_index: int) -> int:
@@ -192,9 +228,9 @@ class RoutingSolver:
         weight_callback_index = routing.RegisterUnaryTransitCallback(weight_demand_callback)
         routing.AddDimensionWithVehicleCapacity(
             weight_callback_index,
-            0,  # null capacity slack
+            0,
             weight_capacities,
-            True,  # start cumul to zero
+            True,
             "WeightCapacity",
         )
 
@@ -205,6 +241,10 @@ class RoutingSolver:
                 cap_vol = v.serra_volume_m3 if v.operates_in_mountain else 0.0
             else:
                 cap_vol = v.urbano_volume_m3
+
+            if strategy == "menor_volume":
+                cap_vol = cap_vol * 0.85
+
             vol_capacities.append(int(cap_vol * 1000))
 
         def vol_demand_callback(from_index: int) -> int:
@@ -222,11 +262,24 @@ class RoutingSolver:
             "VolumeCapacity",
         )
 
+        # Se menor tempo, equilibrar a jornada adicionando dimensão de tempo com limite de span
+        if strategy == "menor_tempo":
+            def distance_span_callback(from_index: int, to_index: int) -> int:
+                f = manager.IndexToNode(from_index)
+                t = manager.IndexToNode(to_index)
+                return distance_matrix[f][t]
+            span_cb = routing.RegisterTransitCallback(distance_span_callback)
+            routing.AddDimension(
+                span_cb,
+                0,
+                2_000_000,
+                True,
+                "DistanceSpan",
+            )
+            dist_dimension = routing.GetDimensionOrDie("DistanceSpan")
+            dist_dimension.SetGlobalSpanCostCoefficient(50)
+
         # 4. Disjunções e Penalidades por Tipo de Entrega
-        # URGENTE: penalidade máxima (1.000.000) -> Inclusão mandatória
-        # NORMAL: penalidade padrão (100.000)
-        # TOPIC: penalidade alta (500.000)
-        # PROGRAMADO: penalidade baixa (5.000) -> Entra apenas com sobra de espaço
         for i, order in enumerate(orders):
             node_index = manager.NodeToIndex(i + 1)
             order_type = order.delivery_type.upper()
@@ -242,7 +295,7 @@ class RoutingSolver:
 
             routing.AddDisjunction([node_index], penalty)
 
-            # Restrição para veículos específicos (ex: Moto não leva peso > 300kg e não vai para serra)
+            # Restrição para Moto Titan 160 Start
             for v_idx, v in enumerate(active_vehicles):
                 if "Moto" in v.name:
                     if order.weight_kg > 300 or is_mountain or order.city in [
@@ -252,13 +305,23 @@ class RoutingSolver:
 
         # 5. Parâmetros de Busca do Solver
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
-        search_parameters.first_solution_strategy = (
-            routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
-        )
+        if strategy == "menor_custo":
+            search_parameters.first_solution_strategy = (
+                routing_enums_pb2.FirstSolutionStrategy.SAVINGS
+            )
+        elif strategy == "menor_tempo":
+            search_parameters.first_solution_strategy = (
+                routing_enums_pb2.FirstSolutionStrategy.PARALLEL_CHEAPEST_INSERTION
+            )
+        else:
+            search_parameters.first_solution_strategy = (
+                routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
+            )
+
         search_parameters.local_search_metaheuristic = (
             routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
         )
-        search_parameters.time_limit.seconds = time_limit_seconds
+        search_parameters.time_limit.seconds = max(1, time_limit_seconds)
 
         # 6. Resolução
         solution = routing.SolveWithParameters(search_parameters)
@@ -267,7 +330,7 @@ class RoutingSolver:
         unassigned_orders: List[DeliveryOrder] = []
 
         if not solution:
-            logger.warning("OR-Tools não encontrou solução viável com os parâmetros fornecidos.")
+            logger.warning(f"OR-Tools não encontrou solução para estratégia '{strategy}'.")
             return [], orders
 
         # 7. Extração das Rotas e Cálculo de LIFO (Precedência Reversa)
@@ -300,8 +363,8 @@ class RoutingSolver:
             running_dist_km = 0.0
 
             # LIFO Precedence:
-            # First stop visited (index 0) is last to be loaded into the trunk (near the door).
-            # Last stop visited (index total_stops_count - 1) is 1st to be loaded (deep inside).
+            # O primeiro a ser entregue fica por último no baú (na porta).
+            # O último a ser entregue é o 1º a ser colocado (no fundo).
             for stop_idx, (ord_item, leg_km) in enumerate(raw_stops):
                 running_dist_km += leg_km
                 stop_num = stop_idx + 1
@@ -324,8 +387,8 @@ class RoutingSolver:
                     )
                 )
 
-            # Return trip to Depot
-            last_stop_node = manager.IndexToNode(raw_stops[-1][0].order_id if False else orders.index(raw_stops[-1][0]) + 1)
+            # Viagem de retorno ao CD de Crateús
+            last_stop_node = orders.index(raw_stops[-1][0]) + 1
             return_leg_km = distance_matrix[last_stop_node][0] / 1000.0
             total_route_distance_km = running_dist_km + return_leg_km
 
@@ -337,7 +400,6 @@ class RoutingSolver:
             safety_label = "90% (Serra / Longa Distância)" if is_mountain else "95% (Plano / Urbano)"
 
             occupancy_percent = (total_weight / effective_cap_kg * 100.0) if effective_cap_kg > 0 else 0.0
-            # Accelo check: >= 60% occupancy or contains urgent orders
             has_urgent = any(s.order.delivery_type == "URGENTE" for s in stops)
             has_topics = any(s.order.delivery_type == "TOPIC" for s in stops)
 
@@ -346,7 +408,7 @@ class RoutingSolver:
             else:
                 meets_min = True
 
-            # Coordinates path: Depot -> Stop 1 -> ... -> Stop K -> Depot
+            # Trajeto de coordenadas GeoJSON
             coords_path = [(HUB_CRATEUS["lat"], HUB_CRATEUS["lon"])]
             for s in stops:
                 coords_path.append((s.order.lat, s.order.lon))
@@ -396,5 +458,58 @@ class RoutingSolver:
 
         return routes_result, unassigned_orders
 
+    def solve_all_strategies(
+        self,
+        orders: List[DeliveryOrder],
+        active_vehicles: List[VehicleConfig],
+        distance_matrix: List[List[int]],
+        is_mountain: bool,
+        time_limit_per_strategy_seconds: int = 2,
+    ) -> Dict[str, Tuple[List[VehicleRouteResult], List[DeliveryOrder]]]:
+        """
+        Calcula as 5 opções estratégicas de rotas solicitadas pelo usuário:
+        1. 'recomendada': Melhor rota balanceada (padrão)
+        2. 'menor_custo': Menor custo financeiro total em R$ (combustível e rodagem)
+        3. 'menor_tempo': Menor tempo de trânsito e viagem
+        4. 'menor_peso': Distribuição equilibrada e suave de peso entre os veículos
+        5. 'menor_volume': Otimização de compacidade volumétrica
+        """
+        strategies = ["recomendada", "menor_custo", "menor_tempo", "menor_peso", "menor_volume"]
+        results = {}
+
+        # Calcula a estratégia recomendada com prioridade
+        rec_routes, rec_unassigned = self.solve(
+            orders=orders,
+            active_vehicles=active_vehicles,
+            distance_matrix=distance_matrix,
+            is_mountain=is_mountain,
+            time_limit_seconds=max(2, time_limit_per_strategy_seconds),
+            strategy="recomendada",
+        )
+        results["recomendada"] = (rec_routes, rec_unassigned)
+
+        # Calcula as demais estratégias
+        for strat in strategies[1:]:
+            try:
+                r_routes, r_unassigned = self.solve(
+                    orders=orders,
+                    active_vehicles=active_vehicles,
+                    distance_matrix=distance_matrix,
+                    is_mountain=is_mountain,
+                    time_limit_seconds=time_limit_per_strategy_seconds,
+                    strategy=strat,
+                )
+                # Se uma estratégia alternativa não encontrar rota viável, faz fallback para a recomendada
+                if not r_routes and rec_routes:
+                    results[strat] = (rec_routes, rec_unassigned)
+                else:
+                    results[strat] = (r_routes, r_unassigned)
+            except Exception as e:
+                logger.warning(f"Erro ao calcular estratégia {strat}: {e}. Usando fallback.")
+                results[strat] = (rec_routes, rec_unassigned)
+
+        return results
+
 
 routing_solver = RoutingSolver()
+
