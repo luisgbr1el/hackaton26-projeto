@@ -156,6 +156,13 @@ class OptimizeResponse(BaseModel):
     total_orders_routed: int
     total_pickup_orders: int
     total_unassigned_orders: int
+    total_batch_value_reais: float = 0.0
+    total_batch_weight_kg: float = 0.0
+    total_batch_volume_m3: float = 0.0
+    total_batch_orders: int = 0
+    routed_value_reais: float = 0.0
+    unassigned_value_reais: float = 0.0
+    pickup_value_reais: float = 0.0
     is_mountain_route: bool
     safety_factor_label: str
     strategies_summary: List[StrategySummaryCardDTO]
@@ -213,6 +220,15 @@ class DispatchSummaryResponse(BaseModel):
     report_id: int
     filename: str
     total_value_reais: float
+    total_batch_value_reais: float = 0.0
+    total_batch_weight_kg: float = 0.0
+    total_batch_volume_m3: float = 0.0
+    total_batch_orders: int = 0
+    routed_value_reais: float = 0.0
+    unassigned_value_reais: float = 0.0
+    pickup_value_reais: float = 0.0
+    total_fleet_capacity_kg: int = 0
+    total_fleet_capacity_m3: float = 0.0
     total_weight_kg: float
     total_volume_m3: float
     total_distance_km: float

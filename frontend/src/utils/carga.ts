@@ -38,7 +38,12 @@ export const distribuirPedidos = (
   paradas.forEach((parada) => {
     const alocados: PedidoAlocado[] = [];
     for (let i = 0; i < parada.pedidos && disponiveis.length > 0; i += 1) {
-      const indiceCidade = disponiveis.findIndex((pedido) => pedido.cidade === parada.cidade);
+      const indiceCidade = disponiveis.findIndex(
+        (pedido) =>
+          pedido.cidade.toLowerCase() === parada.cidade.toLowerCase() ||
+          pedido.cidade.toLowerCase().includes(parada.cidade.toLowerCase()) ||
+          parada.cidade.toLowerCase().includes(pedido.cidade.toLowerCase()),
+      );
       alocados.push(disponiveis.splice(indiceCidade >= 0 ? indiceCidade : 0, 1)[0]);
     }
     porParada.set(parada.ordem, alocados);

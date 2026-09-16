@@ -302,4 +302,6 @@ Formate em Markdown executivo para compartilhamento no WhatsApp e arquivo no SQL
 - **Fase 4:** Prompts LLM e persistência automática dos relatórios calculados no SQLite com as 5 estratégias e ordem de carregamento LIFO.
 - **Fase 5:** Interface React interativa com tela de login, mapa Leaflet colorido e tela de histórico de relatórios salvos.
 - **Fase 6:** Georreferenciamento de Logradouros Urbanos, CEPs e Dados do IBGE (`2304103`), recomendação inteligente do melhor caminhão (`recommended_truck`), filtro temporal de pedidos (`start_date`/`end_date`) e bloqueio automático de motos para cargas pesadas individuais ($\ge 300\text{ kg}$).
-- **Fase 7:** Suíte de 15 testes de produção em `backend/test_api_suite.py` com validação de ponta a ponta.
+- **Fase 7:** Suíte de testes de produção com validação de ponta a ponta.
+- **Fase 8:** Conexão e integração ponta a ponta do Frontend React existente com a API FastAPI real (`/auth/login`, `/routing/fleet`, `/routing/optimize`, `/routing/summary/{report_id}`), adaptador universal de DTOs para `PlanoCarga`, seleção dinâmica de estratégias, recomendação do caminhão ideal e ordem física LIFO, preservando 100% da identidade visual, layout e CSS.
+

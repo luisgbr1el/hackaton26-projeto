@@ -79,8 +79,13 @@ export const ResumoPlano: React.FC<ResumoPlanoProps> = ({ plano }) => {
           <span className="stat-icone">
             <Banknote size={18} />
           </span>
-          <span className="stat-rotulo">Valor total</span>
+          <span className="stat-rotulo">Valor total do lote</span>
           <strong className="stat-valor">{formatMoeda(resumo.valorTotal)}</strong>
+          {resumo.valorDespachado !== undefined && resumo.valorDespachado > 0 && resumo.valorDespachado < resumo.valorTotal && (
+            <span className="stat-limite">
+              {formatMoeda(resumo.valorDespachado)} despachados na rota
+            </span>
+          )}
         </div>
 
         <div className="stat">
@@ -89,7 +94,7 @@ export const ResumoPlano: React.FC<ResumoPlanoProps> = ({ plano }) => {
           </span>
           <span className="stat-rotulo">Peso total</span>
           <strong className="stat-valor">{formatPeso(resumo.pesoTotalKg)}</strong>
-          <span className="stat-limite">Limite {formatPeso(veiculo.capacidadePesoKg)}</span>
+          <span className="stat-limite">Limite {formatPeso(resumo.capacidadeTotalKg || veiculo.capacidadePesoKg)}</span>
         </div>
 
         <div className="stat">
@@ -99,7 +104,7 @@ export const ResumoPlano: React.FC<ResumoPlanoProps> = ({ plano }) => {
           <span className="stat-rotulo">Volume total</span>
           <strong className="stat-valor">{formatVolume(resumo.volumeTotalM3)}</strong>
           <span className="stat-limite">
-            Limite {formatNumero(veiculo.capacidadeVolumeM3, 0)} m³
+            Limite {formatNumero(resumo.capacidadeTotalM3 || veiculo.capacidadeVolumeM3, 2)} m³
           </span>
         </div>
 
@@ -107,7 +112,7 @@ export const ResumoPlano: React.FC<ResumoPlanoProps> = ({ plano }) => {
           <span className="stat-icone">
             <PieChart size={18} />
           </span>
-          <span className="stat-rotulo">Ocupação do veículo</span>
+          <span className="stat-rotulo">Ocupação da carga</span>
           <strong className="stat-valor">{formatPercentual(ocupacao)}</strong>
           <span className="stat-limite">Maior entre peso e volume</span>
         </div>
@@ -118,13 +123,13 @@ export const ResumoPlano: React.FC<ResumoPlanoProps> = ({ plano }) => {
           rotulo="Ocupação por peso"
           percentual={resumo.ocupacaoPeso}
           utilizado={formatPeso(resumo.pesoTotalKg)}
-          capacidade={formatPeso(veiculo.capacidadePesoKg)}
+          capacidade={formatPeso(resumo.capacidadeTotalKg || veiculo.capacidadePesoKg)}
         />
         <Barra
           rotulo="Ocupação por volume"
           percentual={resumo.ocupacaoVolume}
           utilizado={formatVolume(resumo.volumeTotalM3)}
-          capacidade={formatVolume(veiculo.capacidadeVolumeM3)}
+          capacidade={formatVolume(resumo.capacidadeTotalM3 || veiculo.capacidadeVolumeM3)}
         />
       </div>
 
@@ -150,9 +155,22 @@ export const ResumoPlano: React.FC<ResumoPlanoProps> = ({ plano }) => {
       <div className="resumo-rodape">
         <span>
           <ClipboardList size={14} /> {formatNumero(resumo.totalPedidos)} pedidos alocados
+          {resumo.pedidosTotalLote && resumo.pedidosTotalLote > resumo.totalPedidos
+            ? ` de ${formatNumero(resumo.pedidosTotalLote)} no lote`
+            : ''}
         </span>
+        {resumo.pedidosPendentes !== undefined && resumo.pedidosPendentes > 0 && (
+          <span>
+            {formatNumero(resumo.pedidosPendentes)} pedidos na fila
+          </span>
+        )}
+        {resumo.pedidosBalcao !== undefined && resumo.pedidosBalcao > 0 && (
+          <span>
+            {formatNumero(resumo.pedidosBalcao)} retirada no balcão
+          </span>
+        )}
         <span>
-          <Boxes size={14} /> {formatNumero(resumo.totalItens)} itens no total
+          <Boxes size={14} /> {formatNumero(resumo.totalItens)} volumes
         </span>
       </div>
     </section>

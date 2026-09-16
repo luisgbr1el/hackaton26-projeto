@@ -571,6 +571,10 @@ class RoutingService:
         # 2. Avaliar melhor caminhão recomendado com base no peso e características do lote
         total_batch_w = sum(o.weight_kg for o in orders_to_route)
         total_batch_v = sum(o.volume_m3 for o in orders_to_route)
+        total_batch_val = sum(o.value_reais for o in orders_to_route) + sum(p.get("value_reais", 0.0) for p in pickup_orders)
+        total_batch_w_all = total_batch_w + sum(p.get("weight_kg", 0.0) for p in pickup_orders)
+        total_batch_v_all = total_batch_v + sum(p.get("volume_m3", 0.0) for p in pickup_orders)
+        pickup_total_val = sum(p.get("value_reais", 0.0) for p in pickup_orders)
         all_intra = all(o.is_intra_city for o in orders_to_route) if orders_to_route else False
 
         rec_truck_dict = fleet_service.recommend_best_truck(
@@ -708,6 +712,10 @@ class RoutingService:
                 for u in strat_unassigned
             ]
 
+            fleet_cap_kg_total = sum(r.effective_capacity_kg for r in dto_list)
+            fleet_cap_m3_total = sum(r.effective_capacity_m3 for r in dto_list)
+            unassigned_total_val = sum(u.get("value_reais", 0.0) for u in unassigned_list)
+
             strategies_storage_data[s_id] = {
                 "routes": [r.model_dump() for r in dto_list],
                 "manifest_markdown": manifest_md,
@@ -715,6 +723,15 @@ class RoutingService:
                 "total_weight": s_tot_weight,
                 "total_vol": s_tot_vol,
                 "total_val": s_tot_val,
+                "routed_value_reais": s_tot_val,
+                "total_batch_val": round(total_batch_val, 2),
+                "total_batch_weight": round(total_batch_w_all, 2),
+                "total_batch_vol": round(total_batch_v_all, 3),
+                "total_batch_orders": len(df),
+                "unassigned_value_reais": round(unassigned_total_val, 2),
+                "pickup_value_reais": round(pickup_total_val, 2),
+                "total_fleet_capacity_kg": fleet_cap_kg_total,
+                "total_fleet_capacity_m3": round(fleet_cap_m3_total, 3),
                 "total_fuel_l": fuel_l,
                 "total_fuel_cost": fuel_cost,
                 "vehicles_used": s_vehicles,
@@ -749,6 +766,13 @@ class RoutingService:
             total_orders_routed=strategies_summary_list[0].stops_count if strategies_summary_list else 0,
             total_pickup_orders=len(pickup_orders),
             total_unassigned_orders=len(default_strat["unassigned_orders"]),
+            total_batch_value_reais=round(total_batch_val, 2),
+            total_batch_weight_kg=round(total_batch_w_all, 2),
+            total_batch_volume_m3=round(total_batch_v_all, 3),
+            total_batch_orders=len(df),
+            routed_value_reais=strategies_summary_list[0].total_value_reais if strategies_summary_list else 0.0,
+            unassigned_value_reais=round(sum(u.get("value_reais", 0.0) for u in default_strat["unassigned_orders"]), 2),
+            pickup_value_reais=round(pickup_total_val, 2),
             is_mountain_route=is_mountain,
             safety_factor_label="90% (Serra / Longa Distância)" if is_mountain else "95% (Plano / Urbano)",
             strategies_summary=strategies_summary_list,
@@ -913,10 +937,36 @@ class RoutingService:
         tot_vol = sum(v.total_volume_m3 for v in vehicles_summary)
         overall_occ = round((tot_weight / tot_capacity_kg_all * 100.0), 1) if tot_capacity_kg_all > 0 else 0.0
 
+        tot_batch_val = float(target_strat.get("total_batch_val", 0.0))
+        unassigned_val = float(target_strat.get("unassigned_value_reais", 0.0))
+        if unassigned_val <= 0 and "unassigned_orders" in target_strat and target_strat["unassigned_orders"]:
+            unassigned_val = sum(float(u.get("value_reais", 0.0)) for u in target_strat["unassigned_orders"])
+
+        pickup_val = float(target_strat.get("pickup_value_reais", 0.0))
+
+        if tot_batch_val <= 0:
+            if unassigned_val > 0:
+                tot_batch_val = round(tot_val_all + unassigned_val + pickup_val, 2)
+            else:
+                tot_batch_val = tot_val_all
+
+        routed_val = float(target_strat.get("routed_value_reais", tot_val_all))
+        fleet_cap_kg = int(target_strat.get("total_fleet_capacity_kg", tot_capacity_kg_all))
+        fleet_cap_m3 = float(target_strat.get("total_fleet_capacity_m3", sum(v.effective_capacity_m3 for v in vehicles_summary)))
+
         return DispatchSummaryResponse(
             report_id=report_id,
             filename=rep["filename"],
-            total_value_reais=round(tot_val_all, 2),
+            total_value_reais=round(tot_batch_val, 2),
+            total_batch_value_reais=round(tot_batch_val, 2),
+            total_batch_weight_kg=round(float(target_strat.get("total_batch_weight", tot_weight)), 2),
+            total_batch_volume_m3=round(float(target_strat.get("total_batch_vol", tot_vol)), 3),
+            total_batch_orders=int(target_strat.get("total_batch_orders", len(all_loading_orders))),
+            routed_value_reais=round(routed_val, 2),
+            unassigned_value_reais=round(unassigned_val, 2),
+            pickup_value_reais=round(pickup_val, 2),
+            total_fleet_capacity_kg=fleet_cap_kg,
+            total_fleet_capacity_m3=round(fleet_cap_m3, 3),
             total_weight_kg=round(tot_weight, 2),
             total_volume_m3=round(tot_vol, 3),
             total_distance_km=round(tot_dist, 2),

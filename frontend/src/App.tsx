@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Cabecalho } from './components/Cabecalho';
 import { Login } from './components/Login';
 import { MenuPrincipal } from './components/MenuPrincipal';
@@ -14,11 +14,18 @@ import { ResumoPlano } from './components/ResumoPlano';
 import { PedidosAlocados } from './components/PedidosAlocados';
 import { RelatorioImpressao } from './components/RelatorioImpressao';
 import { OpcoesRota } from './components/OpcoesRota';
-import { gerarPlanoCarga } from './api/planoCarga';
+import { SeletorEstrategias } from './components/SeletorEstrategias';
+import { gerarPlanoCargaCompleto } from './api/planoCarga';
+import { getFleetApi } from './api/fleet';
+import {
+  obterResumoDespacho,
+  mapDispatchSummaryToPlanoCarga,
+  mapaEstrategiaParaBackend,
+  type OptimizeResponse,
+} from './api/routing';
 import { FROTA } from './mocks/frota';
 import { planoDemo, planoDemoPara } from './mocks/planoCarga';
-import { aplicarVeiculo, filtrarPorPeriodo, removerRetiradas } from './utils/carga';
-import { recomendarVeiculo } from './utils/recomendacao';
+import { aplicarVeiculo } from './utils/carga';
 import { encerrarSessao, lerSessao, salvarSessao } from './auth/admin';
 import type { CriterioRota, Periodo, PlanoCarga, Veiculo } from './types';
 import {
@@ -31,17 +38,30 @@ import {
   Home as HomeIcon,
 } from 'lucide-react';
 
-/** Permite validar a tela enquanto o endpoint de otimização não existe. */
-const PERMITE_DEMO = import.meta.env.VITE_DEMO_FALLBACK !== 'false';
-
 export const App: React.FC = () => {
   const [usuario, setUsuario] = useState<string | null>(() => lerSessao());
   const [aba, setAba] = useState<AbaPrincipal>('home');
+  const [frota, setFrota] = useState<Veiculo[]>(FROTA);
   const [plano, setPlano] = useState<PlanoCarga | null>(null);
+  const [reportId, setReportId] = useState<number | null>(null);
+  const [optimizeResp, setOptimizeResp] = useState<OptimizeResponse | null>(null);
   const [processando, setProcessando] = useState(false);
+  const [alternandoEstrategia, setAlternandoEstrategia] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [modoDemo, setModoDemo] = useState(false);
   const [criterioRota, setCriterioRota] = useState<CriterioRota>('melhor');
+
+  useEffect(() => {
+    let montado = true;
+    getFleetApi().then((frotaBackend) => {
+      if (montado && frotaBackend && frotaBackend.length > 0) {
+        setFrota(frotaBackend);
+      }
+    });
+    return () => {
+      montado = false;
+    };
+  }, []);
 
   const entrar = (nome: string) => {
     salvarSessao(nome);
@@ -52,6 +72,8 @@ export const App: React.FC = () => {
     encerrarSessao();
     setUsuario(null);
     setPlano(null);
+    setReportId(null);
+    setOptimizeResp(null);
     setModoDemo(false);
     setAba('home');
   };
@@ -60,6 +82,8 @@ export const App: React.FC = () => {
     setErro(null);
     setPlano(veiculo ? planoDemoPara(veiculo, periodo) : planoDemo(periodo));
     setModoDemo(true);
+    setReportId(null);
+    setOptimizeResp(null);
     setCriterioRota('melhor');
   };
 
@@ -67,23 +91,49 @@ export const App: React.FC = () => {
     setProcessando(true);
     setErro(null);
     try {
-      const resultado = await gerarPlanoCarga(arquivo, periodo);
-      // Período escolhido e retirada no balcão saem antes de qualquer cálculo;
-      // o veículo vem da recomendação sobre a carga que sobrou.
-      const filtrado = removerRetiradas(filtrarPorPeriodo(resultado, periodo));
-      const recomendacao = recomendarVeiculo(filtrado, FROTA);
-      setPlano(aplicarVeiculo({ ...filtrado, recomendacao }, recomendacao.veiculo));
+      const resultado = await gerarPlanoCargaCompleto(arquivo, periodo, frota);
+      setPlano(resultado.plano);
+      setReportId(resultado.optimizeResp.report_id);
+      setOptimizeResp(resultado.optimizeResp);
       setModoDemo(false);
       setCriterioRota('melhor');
-    } catch {
-      if (PERMITE_DEMO) {
-        carregarExemplo(periodo);
-      } else {
-        setErro('Não foi possível gerar o plano de carga. Verifique se a API está disponível.');
-        setPlano(null);
-      }
+    } catch (err: any) {
+      console.error('Erro na otimização de rotas:', err);
+      const detalhe =
+        err?.response?.data?.detail ||
+        err?.message ||
+        'Não foi possível gerar o plano de carga. Verifique se a API do backend está disponível.';
+      setErro(typeof detalhe === 'string' ? detalhe : JSON.stringify(detalhe));
+      setPlano(null);
+      setReportId(null);
+      setOptimizeResp(null);
     } finally {
       setProcessando(false);
+    }
+  };
+
+  /**
+   * Atualiza a rota e paradas com a estratégia de otimização escolhida no backend.
+   */
+  const trocarCriterioRota = async (criterio: CriterioRota) => {
+    setCriterioRota(criterio);
+    if (reportId && !modoDemo) {
+      setAlternandoEstrategia(true);
+      try {
+        const stratBackend = mapaEstrategiaParaBackend[criterio] || 'recomendada';
+        const summary = await obterResumoDespacho(reportId, stratBackend);
+        const novoPlano = mapDispatchSummaryToPlanoCarga(
+          summary,
+          optimizeResp || undefined,
+          frota,
+          criterio,
+        );
+        setPlano(novoPlano);
+      } catch (err) {
+        console.warn('Erro ao alternar estratégia de rota no backend:', err);
+      } finally {
+        setAlternandoEstrategia(false);
+      }
     }
   };
 
@@ -102,6 +152,8 @@ export const App: React.FC = () => {
 
   const limpar = () => {
     setPlano(null);
+    setReportId(null);
+    setOptimizeResp(null);
     setErro(null);
     setModoDemo(false);
     setCriterioRota('melhor');
@@ -176,6 +228,15 @@ export const App: React.FC = () => {
                 )}
               </div>
 
+              {opcoesRota.length > 0 && (
+                <SeletorEstrategias
+                  opcoes={opcoesRota}
+                  selecionado={opcaoAtiva?.criterio ?? 'melhor'}
+                  onSelecionar={trocarCriterioRota}
+                  carregando={alternandoEstrategia}
+                />
+              )}
+
               <ResumoPlano plano={plano} />
             </>
           )}
@@ -201,7 +262,7 @@ export const App: React.FC = () => {
                 </section>
               )}
               <FrotaLista
-                frota={FROTA}
+                frota={frota}
                 selecionadoId={plano?.veiculo.id}
                 onSelecionar={selecionarVeiculo}
               />
@@ -224,7 +285,7 @@ export const App: React.FC = () => {
                   <OpcoesRota
                     opcoes={opcoesRota}
                     selecionado={opcaoAtiva?.criterio ?? 'melhor'}
-                    onSelecionar={setCriterioRota}
+                    onSelecionar={trocarCriterioRota}
                   />
                 )}
               </>

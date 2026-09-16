@@ -270,15 +270,38 @@ npm run dev
 
 ## 8. 📋 Checklist de Validação para Novas Funcionalidades
 
-Antes de considerar qualquer tarefa finalizada, o agente deve verificar:
-- [ ] O CSV enviado pelo frontend é lido independentemente de ser delimitado por `;` ou `,` e codificado em `utf-8` ou `latin-1`.
-- [ ] Os pedidos de `RETIRADA` são separados para a fila de balcão e não aparecem na rota do caminhão.
-- [ ] Pedidos `TOPIC` têm sua parada associada ao Ponto das Topics de Crateús.
-- [ ] Pedidos `URGENTE` para o interior respeitam o prazo prioritário de até 3 dias.
-- [ ] As rotas no mapa Leaflet exibem as 5 cores oficiais da frota (🔵 🔴 🟢 🟠 🟡) com suas placas simuladas (`CRA-1A01` a `CRA-5E05`).
-- [ ] A margem de segurança respeita 90% em trechos de serra e 95% em trechos urbanos.
-- [ ] O relatório gerado é persistido na tabela `reports` do banco SQLite com os resumos das 5 estratégias.
-- [ ] O caminhão recomendado (`recommended_truck`) é devidamente dimensionado com taxa de ocupação e justificativa operacional.
-- [ ] A filtragem por intervalo de datas (`start_date` e `end_date`) exclui pedidos fora do escopo sem corromper o cálculo.
-- [ ] Endereços urbanos e CEPs (IBGE: `2304103`) são resolvidos como `URBANO_DETALHADO`, acionando a malha viária rua a rua.
-- [ ] Cargas com itens individuais acima de 300 kg bloqueiam a moto e são alocadas estritamente para caminhões.
+- [x] O CSV enviado pelo frontend é lido independentemente de ser delimitado por `;` ou `,` e codificado em `utf-8` ou `latin-1`.
+- [x] Os pedidos de `RETIRADA` são separados para a fila de balcão e não aparecem na rota do caminhão.
+- [x] Pedidos `TOPIC` têm sua parada associada ao Ponto das Topics de Crateús.
+- [x] Pedidos `URGENTE` para o interior respeitam o prazo prioritário de até 3 dias.
+- [x] As rotas no mapa exibem as 5 cores oficiais da frota (🔵 🔴 🟢 🟠 🟡) com suas placas simuladas (`CRA-1A01` a `CRA-5E05`).
+- [x] A margem de segurança respeita 90% em trechos de serra e 95% em trechos urbanos.
+- [x] O relatório gerado é persistido na tabela `reports` do banco SQLite com os resumos das 5 estratégias.
+- [x] O caminhão recomendado (`recommended_truck`) é devidamente dimensionado com taxa de ocupação e justificativa operacional.
+- [x] A filtragem por intervalo de datas (`start_date` e `end_date`) exclui pedidos fora do escopo sem corromper o cálculo.
+- [x] Endereços urbanos e CEPs (IBGE: `2304103`) são resolvidos como `URBANO_DETALHADO`, acionando a malha viária rua a rua.
+- [x] Cargas com itens individuais acima de 300 kg bloqueiam a moto e são alocadas estritamente para caminhões.
+- [x] Integração completa Frontend <-> Backend com autenticação JWT, carregamento dinâmico da frota, otimização OR-Tools, seleção de estratégias e ordem LIFO.
+
+---
+
+## 9. 🔌 Arquitetura da Integração Frontend <-> Backend
+
+A aplicação React + Vite comunica-se com a API FastAPI através dos seguintes fluxos:
+
+1. **Autenticação JWT (`/api/v1/auth/login`, `/api/v1/auth/me`):**
+   - O login envia credenciais para `POST /auth/login`, recebe o Bearer token JWT e o armazena em `sessionStorage`.
+   - O cliente Axios (`frontend/src/api/client.ts`) anexa automaticamente o cabeçalho `Authorization: Bearer <token>` em todas as requisições.
+
+2. **Carga Dinâmica da Frota (`/api/v1/routing/fleet`):**
+   - No início da aplicação, o frontend consome `GET /routing/fleet` para obter os 5 veículos oficiais com suas placas simuladas, cores hexadecimais, limites nominais e consumos de combustível.
+
+3. **Otimização de Rotas (`/api/v1/routing/optimize`):**
+   - O componente `UploadPedidos` envia o arquivo CSV (e opcionalmente `start_date` e `end_date` selecionados no `FiltroPeriodo`).
+   - O backend processa o arquivo com Google OR-Tools, calcula as 5 estratégias e persiste o resultado no SQLite, retornando o `report_id`, o `recommended_truck` e o `strategies_summary`.
+
+4. **Resumo Consolidado e Carregamento LIFO (`/api/v1/routing/summary/{report_id}?strategy={strategy}`):**
+   - O frontend busca os detalhes da estratégia selecionada (`recomendada`, `menor_custo`, `menor_tempo`, `menor_peso`, `menor_volume`).
+   - O adaptador `mapDispatchSummaryToPlanoCarga` converte o DTO para o modelo `PlanoCarga`, alimentando os componentes `ResumoPlano`, `VeiculoAlocado`, `OrdemCarregamento`, `MapaRota`, `PedidosAlocados` e `RelatorioImpressao`.
+   - Alternar entre as opções de rota na interface dispara uma consulta em tempo real aos dados calculados para a respectiva estratégia.
+

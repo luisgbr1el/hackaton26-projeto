@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Lock, LogIn, User, AlertCircle } from 'lucide-react';
 import { LogoNobreLar } from './LogoNobreLar';
-import { ADMIN_PADRAO, credenciaisValidas } from '../auth/admin';
+import { ADMIN_PADRAO, loginApi } from '../auth/admin';
 import { Rodape } from './Rodape';
 
 interface LoginProps {
@@ -11,16 +11,25 @@ interface LoginProps {
 export const Login: React.FC<LoginProps> = ({ onEntrar }) => {
   const [usuario, setUsuario] = useState('');
   const [senha, setSenha] = useState('');
+  const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
 
-  const submeter = (evento: React.FormEvent) => {
+  const submeter = async (evento: React.FormEvent) => {
     evento.preventDefault();
-    if (!credenciaisValidas(usuario, senha)) {
-      setErro('Usuário ou senha inválidos.');
-      return;
-    }
+    setCarregando(true);
     setErro(null);
-    onEntrar(usuario.trim());
+
+    try {
+      const resposta = await loginApi(usuario, senha);
+      onEntrar(resposta.username);
+    } catch (err: any) {
+      const detalhe =
+        err?.response?.data?.detail ||
+        (err?.message ? `Erro de conexão: ${err.message}` : 'Usuário ou senha inválidos.');
+      setErro(detalhe);
+    } finally {
+      setCarregando(false);
+    }
   };
 
   return (
@@ -78,9 +87,9 @@ export const Login: React.FC<LoginProps> = ({ onEntrar }) => {
               </div>
             )}
 
-            <button type="submit" className="btn btn-primary btn-bloco">
+            <button type="submit" className="btn btn-primary btn-bloco" disabled={carregando}>
               <LogIn size={16} />
-              Entrar
+              {carregando ? 'Entrando...' : 'Entrar'}
             </button>
           </form>
 

@@ -44,6 +44,8 @@ export interface Veiculo {
   tanqueLitros: number;
   /** Consumo médio em quilômetros por litro, com o veículo carregado. */
   consumoKmPorLitro: number;
+  /** Placa do veículo (simulada ou real). */
+  placa?: string;
   /** Opcional: foto real do veículo. Sem ela é exibida a arte padrão. */
   fotoUrl?: string;
 }
@@ -76,6 +78,16 @@ export interface ResumoCarga {
   ocupacaoVolume: number;
   totalPedidos: number;
   totalItens: number;
+  /** Detalhamento financeiro e de lotes da operação */
+  valorDespachado?: number;
+  valorPendente?: number;
+  valorBalcao?: number;
+  capacidadeTotalKg?: number;
+  capacidadeTotalM3?: number;
+  pedidosPendentes?: number;
+  pedidosBalcao?: number;
+  pedidosTotalLote?: number;
+  pesoTotalLoteKg?: number;
 }
 
 export type PrioridadePedido = 'URGENTE' | 'NORMAL' | 'RETIRADA';
@@ -160,6 +172,8 @@ export interface PlanoCarga {
   periodo?: Periodo;
   /** Quantos pedidos ficaram fora por estarem além do período escolhido. */
   foraDoPeriodo?: number;
+  /** ID do relatório persistido no backend. */
+  reportId?: number;
   /** Veículo recomendado pelo sistema para esta carga. */
   recomendacao?: Recomendacao;
 }
