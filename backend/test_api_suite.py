@@ -52,12 +52,14 @@ class TestAPIProductionSuite(unittest.TestCase):
         self.assertIn("Accelo Médio 2", names)
         self.assertIn("Kia Pequeno", names)
         self.assertIn("HR Pequeno", names)
-        self.assertIn("Moto", names)
+        self.assertIn("Moto Titan 160 Start", names)
 
         # Check Moto limits
-        moto = [v for v in fleet if v.name == "Moto"][0]
+        moto = [v for v in fleet if v.name == "Moto Titan 160 Start"][0]
         self.assertEqual(moto.nominal_weight_kg, 300)
+        self.assertEqual(moto.nominal_volume_m3, 0.3833)
         self.assertEqual(moto.urbano_weight_kg, 285)
+        self.assertEqual(moto.urbano_volume_m3, 0.3641)
         self.assertFalse(moto.operates_in_mountain)
 
         # Check Accelo 1 limits
@@ -145,6 +147,61 @@ class TestAPIProductionSuite(unittest.TestCase):
             first_stop = first_route["stops"][0]
             self.assertIn("loading_order_label", first_stop)
             self.assertIn("loading_order_position", first_stop)
+
+    def test_08_intra_city_vs_between_locality_routing(self):
+        """
+        Valida que:
+        1. Se no CSV tiver SÓ A CIDADE (ex: apenas 'CRATEUS' ou 'IPAPORANGA'):
+           - is_intra_city é False, route_type é 'POLO_LOCALIDADE'.
+           - Pedidos na mesma localidade têm distância 0 entre si (consolidação de polo).
+        2. Se no CSV tiver ENDEREÇO/BAIRRO DENTRO DA CIDADE (ex: 'CRATEUS - SAO VICENTE', 'VENANCIOS'):
+           - is_intra_city é True, route_type é 'URBANO_DETALHADO'.
+           - As distâncias entre os bairros são calculadas e otimizadas rua-a-rua pelo OR-Tools.
+        """
+        # Caso 1: CSV apenas com cidades (sem endereço detalhado)
+        csv_cities_only = (
+            "Pedido;Data;Vendedor;Situacao;Cidade;Logistica;Situacao_CSV_Entrega;Valor_Pedido;Qtd_Itens;Itens_Resumo\n"
+            "P1;01/08/2026;V1;Faturado;CRATEUS;ENTREGUE;NORMAL;R$ 100,00;1;PROD A (10 UN)\n"
+            "P2;01/08/2026;V1;Faturado;CRATEUS;ENTREGUE;NORMAL;R$ 150,00;1;PROD B (10 UN)\n"
+            "P3;01/08/2026;V1;Faturado;IPAPORANGA;ENTREGUE;NORMAL;R$ 200,00;1;PROD C (10 UN)\n"
+        )
+        res1 = self.client.post(
+            "/api/v1/routing/optimize",
+            files={"file": ("cities_only.csv", csv_cities_only.encode("utf-8"), "text/csv")},
+            data={"user_prompt": "Despacho padrão"},
+        )
+        self.assertEqual(res1.status_code, 200)
+        data1 = res1.json()
+        self.assertGreater(data1["total_inter_city_stops"], 0)
+        for r in data1["routes"]:
+            for s in r["stops"]:
+                self.assertFalse(s["is_intra_city"])
+                self.assertEqual(s["route_type"], "POLO_LOCALIDADE")
+
+        # Caso 2: CSV com endereços / bairros dentro da cidade
+        csv_with_addresses = (
+            "Pedido;Data;Vendedor;Situacao;Cidade;Logistica;Situacao_CSV_Entrega;Valor_Pedido;Qtd_Itens;Itens_Resumo;Endereco\n"
+            "P10;01/08/2026;V1;Faturado;CRATEUS;ENTREGUE;NORMAL;R$ 100,00;1;PROD A (10 UN);Bairro Sao Vicente\n"
+            "P11;01/08/2026;V1;Faturado;CRATEUS;ENTREGUE;NORMAL;R$ 150,00;1;PROD B (10 UN);Bairro Venancios\n"
+            "P12;01/08/2026;V1;Faturado;CRATEUS;ENTREGUE;NORMAL;R$ 200,00;1;PROD C (10 UN);Centro\n"
+            "P13;01/08/2026;V1;Faturado;IPAPORANGA;ENTREGUE;NORMAL;R$ 200,00;1;PROD D (10 UN);Centro\n"
+        )
+        res2 = self.client.post(
+            "/api/v1/routing/optimize",
+            files={"file": ("with_addresses.csv", csv_with_addresses.encode("utf-8"), "text/csv")},
+            data={"user_prompt": "Otimizar percurso urbano"},
+        )
+        self.assertEqual(res2.status_code, 200)
+        data2 = res2.json()
+        self.assertGreater(data2["total_intra_city_stops"], 0)
+        stops_with_intra = [
+            s for r in data2["routes"] for s in r["stops"] if s["is_intra_city"]
+        ]
+        self.assertGreater(len(stops_with_intra), 0)
+        first_intra = stops_with_intra[0]
+        self.assertTrue(first_intra["is_intra_city"])
+        self.assertEqual(first_intra["route_type"], "URBANO_DETALHADO")
+        self.assertIsNotNone(first_intra["address"])
 
 
 if __name__ == "__main__":

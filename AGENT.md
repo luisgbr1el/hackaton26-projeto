@@ -66,7 +66,7 @@ Sua missão é manter, evoluir e garantir a integridade de um sistema que:
 | 🔴 | **Vermelho** | `#DC2626` | **Accelo Médio 2** | $4.800\text{ kg} \mid 2,45\text{ m}^3$ | **$4.320\text{ kg}$** | **$4.560\text{ kg}$** | Médio / Interior (Eixo Leste/Serra) |
 | 🟢 | **Verde** | `#16A34A` | **Kia Pequeno** | $1.700\text{ kg} \mid 2,18\text{ m}^3$ | **$1.530\text{ kg}$** | **$1.615\text{ kg}$** | Médio / Cargas Intermediárias |
 | 🟠 | **Laranja** | `#EA580C` | **HR Pequeno** | $1.700\text{ kg} \mid 2,18\text{ m}^3$ | **$1.530\text{ kg}$** | **$1.615\text{ kg}$** | Médio / Cargas Médias e Urbanas |
-| 🟡 | **Amarelo** | `#EAB308` | **Moto** | **$300\text{ kg} \mid 0,38\text{ m}^3$** | *(Não vai para serra)* | **$285\text{ kg}$** | Expresso / Ponto das Topics & Crateús |
+| 🟡 | **Amarelo** | `#EAB308` | **Moto Titan 160 Start** | **$300\text{ kg} \mid 0,3833\text{ m}^3$** | *(Não vai para serra)* | **$285\text{ kg}$** | Expresso / Ponto das Topics & Crateús urbano (Titan 160 Start) |
 
 ---
 
@@ -78,6 +78,19 @@ A montagem física da carga na carroceria/baú do caminhão deve seguir obrigato
    - **Colocação intermediária (Meio do Baú):** Entregas do meio da rota em ordem decrescente.
    - **Último a ser colocado (Porta do Baú):** O pedido **mais próximo** (primeira entrega da rota, Parada 1).
 3. **Objetivo:** O motorista descarrega diretamente pela porta do baú sem ter que movimentar mercadorias pesadas que serão entregues mais adiante.
+
+---
+
+### G. Roteamento Inteligente: Entre-Localidades vs. Rota Detalhada Intra-Urbana
+O motor de geocodificação e o solucionador OR-Tools aplicam inteligência espacial adaptativa aos dados de entrega:
+1. **Caso 1: CSV contém apenas a cidade/localidade (ex: `CRATEUS`, `IPAPORANGA`, `SANTANA`):**
+   - Os pedidos são consolidados diretamente no **polo central da localidade** (`is_intra_city = False`, `route_type = 'POLO_LOCALIDADE'`).
+   - A distância entre paradas na mesma cidade sem endereço é tratada como **$0\text{ metros}$**, evitando deslocamentos fictícios no mapa.
+   - O algoritmo calcula a rota estritamente **entre localidades** (rodoviária de polo a polo), otimizando a viagem intermunicipal.
+2. **Caso 2: CSV contém endereço, bairro ou via dentro da cidade (ex: `CRATEUS - SAO VICENTE`, `VENANCIOS`, `RUA CEL ZEZE`):**
+   - O pedido é identificado como endereço urbano específico (`is_intra_city = True`, `route_type = 'URBANO_DETALHADO'`).
+   - As distâncias entre os nós da mesma cidade são calculadas pela **malha viária urbana real** (fator de quarteirões Manhattan de $1,414$ e velocidade média urbana de $25\text{ km/h}$, ou OSRM).
+   - O Google OR-Tools faz **todo o cálculo da melhor rota DENTRO da cidade** (rua a rua / bairro a bairro), eliminando ziguezagues e percursos redundantes, **além do percurso entre as cidades**.
 
 ---
 

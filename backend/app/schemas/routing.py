@@ -10,6 +10,9 @@ class PreviewOrderDTO(BaseModel):
     weight_kg: float
     volume_m3: float
     items_summary: str
+    address: Optional[str] = None
+    is_intra_city: bool = False
+    route_type: str = "POLO_LOCALIDADE"
 
 
 class PreviewResponse(BaseModel):
@@ -40,6 +43,9 @@ class RouteStopDTO(BaseModel):
     cumulative_distance_km: float
     loading_order_position: int
     loading_order_label: str
+    address: Optional[str] = None
+    is_intra_city: bool = False
+    route_type: str = "POLO_LOCALIDADE"
 
 
 class VehicleRouteDTO(BaseModel):
@@ -59,6 +65,8 @@ class VehicleRouteDTO(BaseModel):
     has_topics: bool
     has_urgent: bool
     stops_count: int
+    intra_city_stops_count: int = 0
+    inter_city_stops_count: int = 0
     stops: List[RouteStopDTO]
     geojson: Dict[str, Any]
     manifest_markdown: str
@@ -77,8 +85,11 @@ class OptimizeResponse(BaseModel):
     is_mountain_route: bool
     safety_factor_label: str
     vehicles_used: List[str]
+    total_intra_city_stops: int = 0
+    total_inter_city_stops: int = 0
     routes: List[VehicleRouteDTO]
     pickup_orders: List[Dict[str, Any]]
     unassigned_orders: List[Dict[str, Any]]
     manifest_markdown: str
     reasoning: Optional[str] = None
+

@@ -4,7 +4,7 @@ Este documento define a arquitetura e o plano de implementação do sistema de r
 - **Autenticação Administrativa Segura:** Login único de Admin com credenciais hardcoded via `.env`.
 - **Persistência de Relatórios em SQLite:** Armazenamento do histórico de manifestos, métricas e trajetos calculados em banco local.
 - **Matriz Oficial dos 5 Tipos de Entrega:** Incluindo regra de **`URGENTE` para fora da cidade com SLA acelerado de até 3 dias** (vs 11–15h em Crateús).
-- **Frota Oficial Colorida com Emojis:** 🔵 Accelo Médio 1, 🔴 Accelo Médio 2, 🟢 Kia Pequeno, 🟠 HR Pequeno e 🟡 **Moto com capacidade ajustada para $300\text{ kg}$**.
+- **Frota Oficial Colorida com Emojis:** 🔵 Accelo Médio 1, 🔴 Accelo Médio 2, 🟢 Kia Pequeno, 🟠 HR Pequeno e 🟡 **Moto Titan 160 Start ($300\text{ kg} \mid 0,3833\text{ m}^3$)**.
 - **Regra de Segurança de Carga:** 90% para trechos de serra e longas distâncias vs 95% para trajetos planos e urbanos.
 
 ---
@@ -109,6 +109,17 @@ A montagem da carga no baú/carroceria do veículo segue uma regra física estri
    - **Último a ser colocado no caminhão (Porta / Saída do Baú):** A entrega **mais próxima** (primeira parada da rota: Parada 1).
 3. **Benefício Operacional:** O motorista descarrega diretamente na porta sem necessidade de remanejamento de cargas pesadas durante o trajeto.
 
+### E. 🏙️ Roteamento Inteligente: Entre-Localidades vs. Rota Detalhada Intra-Urbana
+O motor de roteirização aplica tratamento diferenciado conforme a granularidade geográfica dos dados no CSV:
+1. **Se no CSV constar SÓ A CIDADE (ex: `CRATEUS`, `IPAPORANGA`, `SANTANA`):**
+   - Agrupa os pedidos no **polo central da localidade** (`is_intra_city = False`, `route_type = 'POLO_LOCALIDADE'`).
+   - A distância entre paradas no mesmo polo urbano é fixada em **$0\text{ m}$**, sem criar percursos fictícios pelas ruas.
+   - O cálculo de menor distância do Google OR-Tools otimiza estritamente o deslocamento **entre localidades** (rodoviário de polo a polo).
+2. **Se no CSV constar ENDEREÇO OU BAIRRO DENTRO DA CIDADE (ex: `CRATEUS - SAO VICENTE`, `VENANCIOS`, `RUA CEL ZEZE`):**
+   - Geocodifica o ponto na malha viária urbana da cidade (`is_intra_city = True`, `route_type = 'URBANO_DETALHADO'`).
+   - A matriz de distâncias considera a malha de quarteirões urbanos (fator Manhattan $1,414$ e velocidade média urbana de $25\text{ km/h}$, ou OSRM).
+   - O Google OR-Tools calcula a **melhor rota DENTRO da cidade** (rua a rua / bairro a bairro), sequenciando as entregas sem ziguezague, **além de otimizar a conexão rodoviária entre as cidades**.
+
 ---
 
 ## 5. 🚛 Frota Oficial da Empresa: Veículos, Cores, Emojis e Capacidades
@@ -121,7 +132,7 @@ A frota oficial conta com **5 veículos**, cada um com nome e cor atribuídos pa
 | 🔴 | **Vermelho** | `#DC2626` | **Accelo Médio 2** | Médio / Rotas de Interior (Eixo Leste/Serra) | $4.800\text{ kg} \mid 2,45\text{ m}^3$ | **$4.320\text{ kg} \mid 2,20\text{ m}^3$** | **$4.560\text{ kg} \mid 2,33\text{ m}^3$** |
 | 🟢 | **Verde** | `#16A34A` | **Kia Pequeno** | Médio / Cargas Intermediárias e Interior Próximo | $1.700\text{ kg} \mid 2,18\text{ m}^3$ | **$1.530\text{ kg} \mid 1,96\text{ m}^3$** | **$1.615\text{ kg} \mid 2,07\text{ m}^3$** |
 | 🟠 | **Laranja** | `#EA580C` | **HR Pequeno** | Médio / Urgências e Cargas Médias Urbanas | $1.700\text{ kg} \mid 2,18\text{ m}^3$ | **$1.530\text{ kg} \mid 1,96\text{ m}^3$** | **$1.615\text{ kg} \mid 2,07\text{ m}^3$** |
-| 🟡 | **Amarelo** | `#EAB308` | **Moto** | Expresso / Ponto das Topics & Urgências Urbanas | **$300\text{ kg} \mid 0,38\text{ m}^3$** | *(Não vai para serra)* | **$285\text{ kg} \mid 0,36\text{ m}^3$** |
+| 🟡 | **Amarelo** | `#EAB308` | **Moto Titan 160 Start** | Expresso / Ponto das Topics & Urgências Urbanas (Titan 160 Start) | **$300\text{ kg} \mid 0,3833\text{ m}^3$** | *(Não vai para serra)* | **$285\text{ kg} \mid 0,3641\text{ m}^3$** |
 
 ---
 
@@ -176,7 +187,7 @@ Configure os parâmetros para o solucionador Google OR-Tools considerando:
    - 🔴 Vermelho: Accelo Médio 2 (4.800 kg)
    - 🟢 Verde: Kia Pequeno (1.700 kg)
    - 🟠 Laranja: HR Pequeno (1.700 kg)
-   - 🟡 Amarelo: Moto (300 kg | 0.38 m³)
+   - 🟡 Amarelo: Moto Titan 160 Start (300 kg | 0.3833 m³)
 2. Regras de SLA de Urgência:
    - URGENTE dentro de Crateús: prioridade no mesmo dia (11h-15h).
    - URGENTE para o interior: deve ser entregue em até 3 dias (prazo acelerado prioritário).
@@ -231,6 +242,6 @@ Formate em Markdown executivo para compartilhamento no WhatsApp e arquivo no SQL
 
 - **Fase 1:** Configuração da autenticação Admin via `.env` (JWT) e criação do banco SQLite para relatórios.
 - **Fase 2:** Parser de CSV com classificação dos 5 tipos (`RETIRADA`, `URGENTE`, `NORMAL`, `TOPIC`, `PROGRAMADO`) e regras de SLA (11-15h Crateús vs 3d urgente interior).
-- **Fase 3:** Solver Google OR-Tools com a frota oficial: Accelo Médio 1 (🔵), Accelo Médio 2 (🔴), Kia Pequeno (🟢), HR Pequeno (🟠) e Moto 300 kg (🟡), com limites de 90% em serras e 95% no plano.
+- **Fase 3:** Solver Google OR-Tools com a frota oficial: Accelo Médio 1 (🔵), Accelo Médio 2 (🔴), Kia Pequeno (🟢), HR Pequeno (🟠) e Moto Titan 160 Start 300 kg (🟡), com limites de 90% em serras e 95% no plano.
 - **Fase 4:** Prompts LLM e persistência automática dos relatórios calculados no SQLite.
 - **Fase 5:** Interface React interativa com tela de login, mapa Leaflet colorido e tela de histórico de relatórios salvos.

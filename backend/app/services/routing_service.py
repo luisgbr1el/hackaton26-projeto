@@ -77,6 +77,7 @@ class RoutingService:
         return {
             "order_id": find_col(["PEDIDO", "ID_PEDIDO", "NUMERO_PEDIDO", "ID"]),
             "city": find_col(["CIDADE", "MUNICIPIO", "DESTINO"]),
+            "address": find_col(["ENDERECO", "ENDEREÇO", "LOGRADOURO", "RUA", "BAIRRO", "PONTO_REFERENCIA", "LOCAL_ENTREGA", "DESTINO_ENDERECO", "OBSERVAÇÃO", "OBSERVACAO", "OBS"]),
             "delivery_type": find_col(["SITUACAO_CSV_ENTREGA", "SITUACAO", "TIPO_ENTREGA", "LOGISTICA"]),
             "value": find_col(["VALOR DO PEDIDO", "VALOR_PEDIDO", "VALOR"]),
             "qty": find_col(["QTD_ITENS", "QTD", "QUANTIDADE"]),
@@ -97,7 +98,8 @@ class RoutingService:
 
         for idx, row in df.iterrows():
             order_id = str(row[cols["order_id"]]).strip() if cols["order_id"] else f"PED-{idx+1}"
-            city = str(row[cols["city"]]).strip().upper() if cols["city"] and not pd.isna(row[cols["city"]]) else "CRATEUS"
+            raw_city = str(row[cols["city"]]).strip() if cols["city"] and not pd.isna(row[cols["city"]]) else "CRATEUS"
+            raw_address = str(row[cols["address"]]).strip() if cols.get("address") and not pd.isna(row[cols["address"]]) else ""
             raw_type = str(row[cols["delivery_type"]]).strip().upper() if cols["delivery_type"] and not pd.isna(row[cols["delivery_type"]]) else "NORMAL"
             val = parse_monetary_value(row[cols["value"]]) if cols["value"] else 0.0
             qty = int(row[cols["qty"]]) if cols["qty"] and not pd.isna(row[cols["qty"]]) and str(row[cols["qty"]]).isdigit() else 1
@@ -114,15 +116,25 @@ class RoutingService:
             elif "PROGRAMADO" in raw_type:
                 dtype = "PROGRAMADO"
 
+            loc_res = geocoding_service.resolve_location(
+                city_raw=raw_city,
+                address_raw=raw_address,
+                delivery_type=dtype,
+                order_index=idx,
+            )
+
             delivery_types_count[dtype] = delivery_types_count.get(dtype, 0) + 1
-            cities_set.add(city)
+            cities_set.add(loc_res.base_city)
 
             weight, volume = catalog_service.estimate_order_metrics(items_str, qtd_itens=qty)
             estimated_weight += weight
 
             item_dto = PreviewOrderDTO(
                 order_id=order_id,
-                city=city,
+                city=loc_res.base_city,
+                address=loc_res.address if loc_res.address else None,
+                is_intra_city=loc_res.is_intra_city,
+                route_type=loc_res.route_type,
                 delivery_type=dtype,
                 value_reais=round(val, 2),
                 weight_kg=weight,
@@ -163,7 +175,8 @@ class RoutingService:
         # 1. Parse rows and filter RETIRADA
         for idx, row in df.iterrows():
             order_id = str(row[cols["order_id"]]).strip() if cols["order_id"] else f"PED-{idx+1}"
-            city = str(row[cols["city"]]).strip().upper() if cols["city"] and not pd.isna(row[cols["city"]]) else "CRATEUS"
+            raw_city = str(row[cols["city"]]).strip() if cols["city"] and not pd.isna(row[cols["city"]]) else "CRATEUS"
+            raw_address = str(row[cols["address"]]).strip() if cols.get("address") and not pd.isna(row[cols["address"]]) else ""
             raw_type = str(row[cols["delivery_type"]]).strip().upper() if cols["delivery_type"] and not pd.isna(row[cols["delivery_type"]]) else "NORMAL"
             val = parse_monetary_value(row[cols["value"]]) if cols["value"] else 0.0
             qty = int(row[cols["qty"]]) if cols["qty"] and not pd.isna(row[cols["qty"]]) and str(row[cols["qty"]]).isdigit() else 1
@@ -180,13 +193,21 @@ class RoutingService:
             elif "PROGRAMADO" in raw_type:
                 dtype = "PROGRAMADO"
 
-            cities_in_batch.add(city)
+            loc_res = geocoding_service.resolve_location(
+                city_raw=raw_city,
+                address_raw=raw_address,
+                delivery_type=dtype,
+                order_index=idx,
+            )
+
+            cities_in_batch.add(loc_res.base_city)
             weight, volume = catalog_service.estimate_order_metrics(items_str, qtd_itens=qty)
 
             if dtype == "RETIRADA":
                 pickup_orders.append({
                     "order_id": order_id,
-                    "city": city,
+                    "city": loc_res.base_city,
+                    "address": loc_res.address,
                     "delivery_type": dtype,
                     "weight_kg": weight,
                     "volume_m3": volume,
@@ -195,19 +216,21 @@ class RoutingService:
                 })
                 continue
 
-            lat, lon = geocoding_service.get_coordinates(city, delivery_type=dtype, order_index=idx)
             orders_to_route.append(
                 DeliveryOrder(
                     order_id=order_id,
-                    city=city,
+                    city=loc_res.base_city,
                     delivery_type=dtype,
                     weight_kg=weight,
                     volume_m3=volume,
                     value_reais=val,
                     items_summary=items_str,
-                    lat=lat,
-                    lon=lon,
+                    lat=loc_res.lat,
+                    lon=loc_res.lon,
                     date_str=date_str,
+                    address=loc_res.address,
+                    is_intra_city=loc_res.is_intra_city,
+                    route_type=loc_res.route_type,
                 )
             )
 
@@ -226,12 +249,26 @@ class RoutingService:
         else:
             active_vehicles = list(OFFICIAL_FLEET)
 
-        # 4. Build coordinates list & distance matrix
-        all_locations = [(HUB_CRATEUS["lat"], HUB_CRATEUS["lon"])]
+        # 4. Build rich nodes list & distance matrix
+        # Node 0 is Depot (Crateús CD)
+        depot_node = {
+            "lat": HUB_CRATEUS["lat"],
+            "lon": HUB_CRATEUS["lon"],
+            "base_city": "CRATEUS",
+            "is_intra_city": False,
+            "address": "Centro de Distribuição (Crateús)",
+        }
+        all_nodes = [depot_node]
         for o in orders_to_route:
-            all_locations.append((o.lat, o.lon))
+            all_nodes.append({
+                "lat": o.lat,
+                "lon": o.lon,
+                "base_city": o.city,
+                "is_intra_city": o.is_intra_city,
+                "address": o.address,
+            })
 
-        distance_matrix, duration_matrix = geocoding_service.build_distance_matrix(all_locations)
+        distance_matrix, duration_matrix = geocoding_service.build_distance_matrix(all_nodes)
 
         # 5. Run OR-Tools CVRP Solver
         route_results, unassigned = routing_solver.solve(
@@ -256,6 +293,8 @@ class RoutingService:
                     "stop": s.stop_number,
                     "order": s.order.order_id,
                     "city": s.order.city,
+                    "address": s.order.address or "Polo da Cidade",
+                    "route_type": s.order.route_type,
                     "type": s.order.delivery_type,
                     "weight_kg": s.order.weight_kg,
                     "loading_position": s.loading_order_label,
@@ -296,6 +335,8 @@ class RoutingService:
                     has_topics=r.has_topics,
                     has_urgent=r.has_urgent,
                     stops_count=len(r.stops),
+                    intra_city_stops_count=r.intra_city_stops_count,
+                    inter_city_stops_count=r.inter_city_stops_count,
                     stops=[
                         RouteStopDTO(
                             stop_number=s.stop_number,
@@ -312,6 +353,9 @@ class RoutingService:
                             cumulative_distance_km=round(s.cumulative_distance_km, 2),
                             loading_order_position=s.loading_order_position,
                             loading_order_label=s.loading_order_label,
+                            address=s.order.address if s.order.address else None,
+                            is_intra_city=s.order.is_intra_city,
+                            route_type=s.order.route_type,
                         )
                         for s in r.stops
                     ],
@@ -339,6 +383,7 @@ class RoutingService:
             {
                 "order_id": u.order_id,
                 "city": u.city,
+                "address": u.address,
                 "delivery_type": u.delivery_type,
                 "weight_kg": u.weight_kg,
                 "value_reais": u.value_reais,
@@ -346,6 +391,9 @@ class RoutingService:
             }
             for u in unassigned
         ]
+
+        total_intra = sum(r.intra_city_stops_count for r in route_results)
+        total_inter = sum(r.inter_city_stops_count for r in route_results)
 
         return OptimizeResponse(
             report_id=report_id,
@@ -360,6 +408,8 @@ class RoutingService:
             is_mountain_route=is_mountain,
             safety_factor_label="90% (Serra / Longa Distância)" if is_mountain else "95% (Plano / Urbano)",
             vehicles_used=vehicles_used_names,
+            total_intra_city_stops=total_intra,
+            total_inter_city_stops=total_inter,
             routes=routes_dto_list,
             pickup_orders=pickup_orders,
             unassigned_orders=unassigned_dto,

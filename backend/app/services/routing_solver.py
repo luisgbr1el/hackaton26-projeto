@@ -20,6 +20,9 @@ class DeliveryOrder:
         lat: float,
         lon: float,
         date_str: str = "",
+        address: str = "",
+        is_intra_city: bool = False,
+        route_type: str = "POLO_LOCALIDADE",
     ):
         self.order_id = order_id
         self.city = city.strip().upper()
@@ -31,6 +34,9 @@ class DeliveryOrder:
         self.lat = lat
         self.lon = lon
         self.date_str = date_str
+        self.address = address
+        self.is_intra_city = is_intra_city
+        self.route_type = route_type
 
 
 class RouteStop:
@@ -66,6 +72,9 @@ class RouteStop:
             "cumulative_distance_km": round(self.cumulative_distance_km, 2),
             "loading_order_position": self.loading_order_position,
             "loading_order_label": self.loading_order_label,
+            "address": self.order.address,
+            "is_intra_city": self.order.is_intra_city,
+            "route_type": self.order.route_type,
         }
 
 
@@ -103,6 +112,8 @@ class VehicleRouteResult:
         self.coordinates_path = coordinates_path
         self.geojson_feature = geojson_feature
         self.manifest_markdown = manifest_markdown
+        self.intra_city_stops_count = sum(1 for s in stops if s.order.is_intra_city)
+        self.inter_city_stops_count = sum(1 for s in stops if not s.order.is_intra_city)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -123,6 +134,8 @@ class VehicleRouteResult:
             "has_urgent": self.has_urgent,
             "stops": [s.to_dict() for s in self.stops],
             "stops_count": len(self.stops),
+            "intra_city_stops_count": self.intra_city_stops_count,
+            "inter_city_stops_count": self.inter_city_stops_count,
             "geojson": self.geojson_feature,
             "manifest_markdown": self.manifest_markdown,
         }
@@ -231,9 +244,9 @@ class RoutingSolver:
 
             # Restrição para veículos específicos (ex: Moto não leva peso > 300kg e não vai para serra)
             for v_idx, v in enumerate(active_vehicles):
-                if v.name == "Moto":
+                if "Moto" in v.name:
                     if order.weight_kg > 300 or is_mountain or order.city in [
-                        "BURITI DOS MONTES", "PORANGA", "IPAPORANGA", "MONTE NEBO"
+                        "BURITI DOS MONTES", "PORANGA", "IPAPORANGA", "MONTE NEBO", "IBIAPABA"
                     ]:
                         routing.VehicleVar(node_index).RemoveValue(v_idx)
 

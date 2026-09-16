@@ -81,18 +81,18 @@ OFFICIAL_FLEET: List[VehicleConfig] = [
     ),
     VehicleConfig(
         id=4,
-        name="Moto",
+        name="Moto Titan 160 Start",
         color="Amarelo",
         hex_color="#EAB308",
         emoji="🟡",
         nominal_weight_kg=300,
-        nominal_volume_m3=0.38,
+        nominal_volume_m3=0.3833,
         serra_weight_kg=0,
         serra_volume_m3=0.0,
         urbano_weight_kg=285,
-        urbano_volume_m3=0.36,
+        urbano_volume_m3=0.3641,
         operates_in_mountain=False,
-        profile="Expresso / Ponto das Topics e Crateús urbano",
+        profile="Expresso / Ponto das Topics e Crateús urbano (Titan 160 Start)",
     ),
 ]
 

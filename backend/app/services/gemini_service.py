@@ -104,14 +104,14 @@ Configure os parâmetros para o solucionador Google OR-Tools considerando:
 - 🔴 Vermelho: Accelo Médio 2 (4.800 kg nominal) - Médio / Interior
 - 🟢 Verde: Kia Pequeno (1.700 kg nominal) - Médio
 - 🟠 Laranja: HR Pequeno (1.700 kg nominal) - Médio / Urbano
-- 🟡 Amarelo: Moto (300 kg nominal | 0.38 m³) - Cargas pequenas, Ponto das Topics e Crateús
+- 🟡 Amarelo: Moto Titan 160 Start (300 kg nominal | 0.3833 m³) - Cargas pequenas, Ponto das Topics e Crateús urbano
 
 ### Regras Mandatórias:
 1. Pedidos com 'RETIRADA' são balcão e nunca entram na rota.
 2. Cidades com serra ou longa distância (ex: Buriti dos Montes, Poranga, Ipaporanga, Monte Nebo): teto de 90% da capacidade do veículo por segurança.
 3. Trecho urbano ou plano: permite até 95% da capacidade.
 4. Urgência: Crateús prazo de 11h-15h; Interior urgente prazo de até 3 dias.
-5. Cargas maiores que 300 kg nunca podem ser alocadas na Moto.
+5. Cargas maiores que 300 kg nunca podem ser alocadas na Moto Titan 160 Start.
 6. Pedidos URGENTES são o gatilho para completar a carga mínima viável do caminhão.
 
 ### Dados da Operação:
