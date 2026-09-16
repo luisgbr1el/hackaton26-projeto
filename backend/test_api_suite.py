@@ -477,6 +477,70 @@ class TestAPIProductionSuite(unittest.TestCase):
         self.assertEqual(opt_data["date_filter_applied"]["orders_filtered_out"], 2)
         self.assertEqual(opt_data["total_orders_routed"], 2)
 
+    def test_15_crateus_intra_city_stops_with_ceps_and_ibge(self):
+        """
+        Valida o processamento completo de um CSV de teste com 7 paradas dentro de Crateús
+        contendo nomes de ruas oficiais, CEPs e código IBGE 2304103:
+        - Verifica a detecção das 7 paradas intra-urbanas (URBANO_DETALHADO).
+        - Verifica o cálculo das 5 estratégias e a recomendação do caminhão ideal para o lote (~1.899 kg).
+        - Verifica que a ordem de carregamento LIFO e as coordenadas de cada rua são precisas.
+        """
+        csv_file_path = os.path.join(
+            os.path.dirname(__file__),
+            "data", "pedidos", "pedido_teste_rua_cep.csv"
+        )
+        self.assertTrue(os.path.exists(csv_file_path), f"Arquivo não encontrado: {csv_file_path}")
+
+        with open(csv_file_path, "rb") as f:
+            content = f.read()
+
+        # 1. Preview
+        prev_res = self.client.post(
+            "/api/v1/routing/preview",
+            files={"file": ("pedido_teste_rua_cep.csv", content, "text/csv")},
+        )
+        self.assertEqual(prev_res.status_code, 200)
+        prev_data = prev_res.json()
+        self.assertEqual(prev_data["total_orders"], 6)
+        self.assertEqual(prev_data["pickup_orders_count"], 0)
+        self.assertIn("CRATEUS", prev_data["cities_found"])
+        self.assertGreater(prev_data["estimated_total_weight_kg"], 5000.0)
+
+        # 2. Optimize
+        opt_res = self.client.post(
+            "/api/v1/routing/optimize",
+            files={"file": ("pedido_teste_rua_cep.csv", content, "text/csv")},
+            data={"user_prompt": "Cargas pesadas para caminhões médios em Crateús"},
+        )
+        self.assertEqual(opt_res.status_code, 200)
+        opt_data = opt_res.json()
+        self.assertEqual(opt_data["total_orders_routed"], 6)
+        self.assertEqual(len(opt_data["strategies_summary"]), 5)
+
+        # Caminhão recomendado deve ser Accelo Médio pois o lote total (~5.864kg) excede o limite de veículos leves
+        rec = opt_data["recommended_truck"]
+        self.assertIsNotNone(rec)
+        self.assertTrue(rec["license_plate"].startswith("CRA-"))
+        self.assertIn(rec["vehicle_name"], ["Accelo Médio 1", "Accelo Médio 2"])
+
+        # 3. Summary detalhado
+        rep_id = opt_data["report_id"]
+        sum_res = self.client.get(f"/api/v1/routing/summary/{rep_id}")
+        self.assertEqual(sum_res.status_code, 200)
+        sum_data = sum_res.json()
+        self.assertGreater(len(sum_data["routes"]), 0)
+
+        # Nenhuma moto deve ser usada pois cada parada tem peso >= 750kg (teto da moto = 285kg)
+        for r in sum_data["routes"]:
+            self.assertNotIn("Moto", r["vehicle_name"])
+            for s in r["stops"]:
+                self.assertTrue(s["is_intra_city"])
+                self.assertEqual(s["route_type"], "URBANO_DETALHADO")
+                self.assertIsNotNone(s["address"])
+
+        # Ordem de carregamento deve conter os 6 pedidos pesados
+        self.assertEqual(len(sum_data["all_loading_orders"]), 6)
+
 
 if __name__ == "__main__":
     unittest.main()

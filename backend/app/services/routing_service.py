@@ -169,6 +169,8 @@ class RoutingService:
             "order_id": find_col(["PEDIDO", "ID_PEDIDO", "NUMERO_PEDIDO", "ID"]),
             "city": find_col(["CIDADE", "MUNICIPIO", "DESTINO"]),
             "address": find_col(["ENDERECO", "ENDEREÇO", "LOGRADOURO", "RUA", "BAIRRO", "PONTO_REFERENCIA", "LOCAL_ENTREGA", "DESTINO_ENDERECO", "OBSERVAÇÃO", "OBSERVACAO", "OBS"]),
+            "cep": find_col(["CEP", "COD_POSTAL", "CODIGO_POSTAL", "CÓDIGO_POSTAL"]),
+            "ibge": find_col(["IBGE", "COD_IBGE", "CODIGO_IBGE", "CÓDIGO_IBGE"]),
             "delivery_type": find_col(["SITUACAO_CSV_ENTREGA", "SITUACAO", "TIPO_ENTREGA", "LOGISTICA"]),
             "value": find_col(["VALOR DO PEDIDO", "VALOR_PEDIDO", "VALOR"]),
             "qty": find_col(["QTD_ITENS", "QTD", "QUANTIDADE"]),
@@ -199,6 +201,8 @@ class RoutingService:
             order_id = str(row[cols["order_id"]]).strip() if cols["order_id"] else f"PED-{idx+1}"
             raw_city = str(row[cols["city"]]).strip() if cols["city"] and not pd.isna(row[cols["city"]]) else "CRATEUS"
             raw_address = str(row[cols["address"]]).strip() if cols.get("address") and not pd.isna(row[cols["address"]]) else ""
+            raw_cep = str(row[cols["cep"]]).strip() if cols.get("cep") and not pd.isna(row[cols["cep"]]) else ""
+            raw_ibge = str(row[cols["ibge"]]).strip() if cols.get("ibge") and not pd.isna(row[cols["ibge"]]) else ""
             raw_type = str(row[cols["delivery_type"]]).strip().upper() if cols["delivery_type"] and not pd.isna(row[cols["delivery_type"]]) else "NORMAL"
             val = parse_monetary_value(row[cols["value"]]) if cols["value"] else 0.0
             qty = int(row[cols["qty"]]) if cols["qty"] and not pd.isna(row[cols["qty"]]) and str(row[cols["qty"]]).isdigit() else 1
@@ -218,6 +222,8 @@ class RoutingService:
             loc_res = geocoding_service.resolve_location(
                 city_raw=raw_city,
                 address_raw=raw_address,
+                cep_raw=raw_cep,
+                ibge_raw=raw_ibge,
                 delivery_type=dtype,
                 order_index=idx,
             )
@@ -499,6 +505,8 @@ class RoutingService:
             order_id = str(row[cols["order_id"]]).strip() if cols["order_id"] else f"PED-{idx+1}"
             raw_city = str(row[cols["city"]]).strip() if cols["city"] and not pd.isna(row[cols["city"]]) else "CRATEUS"
             raw_address = str(row[cols["address"]]).strip() if cols.get("address") and not pd.isna(row[cols["address"]]) else ""
+            raw_cep = str(row[cols["cep"]]).strip() if cols.get("cep") and not pd.isna(row[cols["cep"]]) else ""
+            raw_ibge = str(row[cols["ibge"]]).strip() if cols.get("ibge") and not pd.isna(row[cols["ibge"]]) else ""
             raw_type = str(row[cols["delivery_type"]]).strip().upper() if cols["delivery_type"] and not pd.isna(row[cols["delivery_type"]]) else "NORMAL"
             val = parse_monetary_value(row[cols["value"]]) if cols["value"] else 0.0
             qty = int(row[cols["qty"]]) if cols["qty"] and not pd.isna(row[cols["qty"]]) and str(row[cols["qty"]]).isdigit() else 1
@@ -518,6 +526,8 @@ class RoutingService:
             loc_res = geocoding_service.resolve_location(
                 city_raw=raw_city,
                 address_raw=raw_address,
+                cep_raw=raw_cep,
+                ibge_raw=raw_ibge,
                 delivery_type=dtype,
                 order_index=idx,
             )

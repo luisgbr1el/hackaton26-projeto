@@ -1,6 +1,7 @@
 import math
 import logging
 import hashlib
+import re
 import requests
 from typing import Dict, List, Tuple, Any, Optional
 
@@ -96,6 +97,37 @@ CRATEUS_STREETS: Dict[str, Tuple[float, float]] = {
     "UBALDINO BRANDAO": (-5.1785, -40.6760),
     "UBALDINO BRANDÃO": (-5.1785, -40.6760),
     "JOSE CORREIA": (-5.1765, -40.6745),
+    "CORONEL LUCIO": (-5.1768, -40.6738),
+    "CEL LUCIO": (-5.1768, -40.6738),
+    "FARIAS BRITO": (-5.1772, -40.6725),
+    "SANTOS DUMONT": (-5.1762, -40.6748),
+    "FRANCISCO SA": (-5.1755, -40.6730),
+    "FRANCISCO SÁ": (-5.1755, -40.6730),
+    "PADRE MACEDO": (-5.1770, -40.6715),
+    "BARAO DO RIO BRANCO": (-5.1782, -40.6722),
+    "BARÃO DO RIO BRANCO": (-5.1782, -40.6722),
+    "MANOEL MOREIRA": (-5.1840, -40.6690),
+}
+
+# Código oficial IBGE de Crateús - CE
+CRATEUS_IBGE_CODE = "2304103"
+
+# Mapeamento de CEPs oficiais e dados do IBGE para logradouros de Crateús
+CRATEUS_CEPS: Dict[str, Dict[str, Any]] = {
+    "63700-055": {"street": "Rua Coronel Zezé", "bairro": "Centro", "coords": (-5.1760, -40.6720), "ibge": "2304103"},
+    "63700-064": {"street": "Rua Coronel Zezé", "bairro": "Centro", "coords": (-5.1760, -40.6720), "ibge": "2304103"},
+    "63700-067": {"street": "Rua Coronel Zezé", "bairro": "Centro", "coords": (-5.1760, -40.6720), "ibge": "2304103"},
+    "63704-030": {"street": "Rua Coronel Zezé", "bairro": "São José", "coords": (-5.1810, -40.6650), "ibge": "2304103"},
+    "63700-085": {"street": "Rua Doutor Moreira da Rocha", "bairro": "Centro", "coords": (-5.1775, -40.6735), "ibge": "2304103"},
+    "63700-088": {"street": "Rua Doutor Moreira da Rocha", "bairro": "Centro", "coords": (-5.1775, -40.6735), "ibge": "2304103"},
+    "63702-015": {"street": "Rua Doutor Moreira da Rocha", "bairro": "Fátima II", "coords": (-5.1820, -40.6820), "ibge": "2304103"},
+    "63700-001": {"street": "Rua Coronel Lúcio", "bairro": "Centro", "coords": (-5.1768, -40.6738), "ibge": "2304103"},
+    "63700-004": {"street": "Rua Farias Brito", "bairro": "Centro", "coords": (-5.1772, -40.6725), "ibge": "2304103"},
+    "63700-019": {"street": "Rua Francisco Sá", "bairro": "Centro", "coords": (-5.1755, -40.6730), "ibge": "2304103"},
+    "63700-034": {"street": "Rua Santos Dumont", "bairro": "Centro", "coords": (-5.1762, -40.6748), "ibge": "2304103"},
+    "63700-052": {"street": "Rua Padre Macedo", "bairro": "Centro", "coords": (-5.1770, -40.6715), "ibge": "2304103"},
+    "63700-070": {"street": "Rua Barão do Rio Branco", "bairro": "Centro", "coords": (-5.1782, -40.6722), "ibge": "2304103"},
+    "63708-400": {"street": "Rua Manoel Moreira", "bairro": "Venâncios", "coords": (-5.1840, -40.6690), "ibge": "2304103"},
 }
 
 MOUNTAIN_CITIES = {
@@ -155,10 +187,56 @@ class LocationResolution:
 
 
 class GeocodingService:
+    def __init__(self):
+        self._cep_cache: Dict[str, Dict[str, Any]] = {}
+
+    def lookup_cep_data(self, cep_raw: str) -> Optional[Dict[str, Any]]:
+        """
+        Busca metadados de endereço, logradouro e IBGE a partir de um CEP.
+        Prioriza o catálogo local de Crateús e consulta ViaCEP/IBGE se necessário.
+        """
+        if not cep_raw:
+            return None
+        digits = re.sub(r"\D", "", str(cep_raw))
+        if len(digits) != 8:
+            return None
+        cep_formatted = f"{digits[:5]}-{digits[5:]}"
+
+        # 1. Busca no catálogo oficial pré-mapeado de Crateús
+        if cep_formatted in CRATEUS_CEPS:
+            return CRATEUS_CEPS[cep_formatted]
+
+        # 2. Busca no cache em memória
+        if cep_formatted in self._cep_cache:
+            return self._cep_cache[cep_formatted]
+
+        # 3. Consulta online via API pública do ViaCEP / IBGE
+        try:
+            url = f"https://viacep.com.br/ws/{digits}/json/"
+            resp = requests.get(url, timeout=2.0)
+            if resp.status_code == 200:
+                data = resp.json()
+                if not data.get("erro"):
+                    res_data = {
+                        "street": data.get("logradouro", ""),
+                        "bairro": data.get("bairro", ""),
+                        "localidade": data.get("localidade", ""),
+                        "uf": data.get("uf", ""),
+                        "ibge": data.get("ibge", ""),
+                    }
+                    self._cep_cache[cep_formatted] = res_data
+                    return res_data
+        except Exception as e:
+            logger.debug("Falha na consulta online de CEP %s: %s", cep_formatted, e)
+
+        return None
+
     def resolve_location(
         self,
         city_raw: str,
         address_raw: Optional[str] = None,
+        cep_raw: Optional[str] = None,
+        ibge_raw: Optional[str] = None,
         delivery_type: str = "",
         order_index: int = 0,
     ) -> LocationResolution:
@@ -168,13 +246,15 @@ class GeocodingService:
            - is_intra_city = False, route_type = 'POLO_LOCALIDADE'
            - Coordenadas fixas do polo central da localidade.
            - Permite cálculo estrito de rotas ENTRE LOCALIDADES sem deslocamentos fictícios.
-        2. Se no CSV tiver UM ENDEREÇO OU BAIRRO DENTRO DA CIDADE:
+        2. Se no CSV tiver UM ENDEREÇO, BAIRRO OU CEP DENTRO DA CIDADE:
            - is_intra_city = True, route_type = 'URBANO_DETALHADO'
-           - Coordenadas específicas na malha urbana daquela cidade.
+           - Coordenadas específicas na malha urbana daquela cidade (resolvido por via ou CEP/IBGE).
            - Permite ao OR-Tools calcular a melhor rota DENTRO da cidade (rua-a-rua), além do entre-cidades.
         """
         clean_city_input = str(city_raw or "").strip().upper()
         clean_address_input = str(address_raw or "").strip()
+        clean_cep_input = str(cep_raw or "").strip()
+        clean_ibge_input = str(ibge_raw or "").strip()
 
         # Caso especial: TOPIC é sempre no Ponto das Topics em Crateús
         if delivery_type.upper() == "TOPIC":
@@ -202,7 +282,6 @@ class GeocodingService:
         if matched_city:
             base_city = matched_city
             # Verificar se a string de cidade traz bairro ou rua após delimitador
-            # Ex: "CRATEUS - SAO VICENTE", "CRATEUS (CENTRO)", "CRATEUS, RUA CEL ZEZE"
             for sep in [" - ", " / ", ", ", " (", ";"]:
                 if sep in clean_city_input:
                     parts = clean_city_input.split(sep, 1)
@@ -216,6 +295,28 @@ class GeocodingService:
         # Se veio uma coluna de endereço preenchida, usar ela com prioridade
         if clean_address_input and clean_address_input.upper() != base_city:
             address_detail = clean_address_input
+
+        # 2. Investigar se há CEP informado na coluna de CEP ou dentro do endereço
+        found_cep = clean_cep_input
+        if not found_cep and address_detail:
+            cep_match = re.search(r"\b(\d{5}-?\d{3})\b", address_detail)
+            if cep_match:
+                found_cep = cep_match.group(1)
+
+        cep_data = self.lookup_cep_data(found_cep) if found_cep else None
+        coords_from_cep = None
+        if cep_data:
+            if not address_detail and cep_data.get("street"):
+                bairro_part = f" - {cep_data.get('bairro')}" if cep_data.get("bairro") else ""
+                address_detail = f"{cep_data.get('street')}{bairro_part}"
+            if cep_data.get("localidade"):
+                loc_cand = cep_data.get("localidade", "").upper()
+                if loc_cand in CITY_COORDINATES:
+                    base_city = loc_cand
+            if cep_data.get("coords"):
+                coords_from_cep = cep_data["coords"]
+            if not clean_ibge_input and cep_data.get("ibge"):
+                clean_ibge_input = cep_data.get("ibge")
 
         # 2. Avaliar se é endereço específico ou apenas a localidade
         has_specific_address = False
@@ -243,7 +344,9 @@ class GeocodingService:
         addr_upper = address_detail.upper()
         lat, lon = base_coords
 
-        if base_city in ("CRATEUS", "CRATEÚS"):
+        if coords_from_cep:
+            lat, lon = coords_from_cep
+        elif base_city in ("CRATEUS", "CRATEÚS"):
             # Buscar no catálogo de vias de Crateús
             street_found = False
             for street_key, coords in CRATEUS_STREETS.items():
@@ -275,10 +378,18 @@ class GeocodingService:
             lat = base_coords[0] + (dist_km / 111.0) * math.sin(math.radians(angle))
             lon = base_coords[1] + (dist_km / (111.0 * math.cos(math.radians(base_coords[0])))) * math.cos(math.radians(angle))
 
+        extra_tags = []
+        if found_cep and found_cep not in address_detail:
+            extra_tags.append(f"CEP: {found_cep}")
+        if clean_ibge_input and clean_ibge_input not in address_detail:
+            extra_tags.append(f"IBGE: {clean_ibge_input}")
+
+        display_suffix = f" ({', '.join(extra_tags)})" if extra_tags else ""
+
         return LocationResolution(
             base_city=base_city,
             address=address_detail,
-            display_address=f"{base_city} - {address_detail}",
+            display_address=f"{base_city} - {address_detail}{display_suffix}",
             lat=round(lat, 6),
             lon=round(lon, 6),
             is_intra_city=True,
