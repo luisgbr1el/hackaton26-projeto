@@ -152,6 +152,23 @@ Permite ao operador fazer upload de planilhas mensais ou consolidadas e restring
 - **Comportamento:** Pedidos fora do período informado são desconsiderados antes da roteirização e do dimensionamento da carga.
 - **Metadados Retornados:** `date_filter_applied` contendo `start_date`, `end_date`, `total_orders_before_filter`, `orders_retained`, `orders_filtered_out` e flag `applied`.
 
+---
+
+### M. 📍 Resolução Geográfica de Logradouros Urbanos, CEPs e Metadados do IBGE
+Para viabilizar a roteirização detalhada rua a rua, o sistema possui integração nativa com os padrões postais e estatísticos brasileiros:
+- **Código do Município no IBGE:** `2304103` (Crateús - CE).
+- **Faixa de CEPs:** Crateús opera com codificação individualizada por logradouro (faixa `63700-001` a `63708-899`).
+- **Colunas Reconhecidas no CSV:** O parser identifica flexivelmente colunas como `Endereco`, `Logradouro`, `Rua`, `Bairro`, `CEP` e `IBGE`.
+- **Motor Híbrido de Geocodificação:**
+  1. *Catálogo Local Pré-Mapeado (`CRATEUS_CEPS` & `CRATEUS_STREETS`):* Coordenadas calibradas de alta precisão para vias principais (ex: Rua Coronel Zezé, Dr. Moreira da Rocha, Coronel Lúcio, Santos Dumont, Manoel Moreira, Frei Vidal, Padre Macedo).
+  2. *Consulta Dinâmica ViaCEP / IBGE:* Busca em tempo real com timeout ultrarrápido (2s) e cache em memória para novas vias.
+  3. *Classificação de Rota:* Se o pedido contiver logradouro ou CEP, recebe `is_intra_city = True` e `route_type = 'URBANO_DETALHADO'`. Se contiver apenas a localidade/polo, recebe `is_intra_city = False` e `route_type = 'POLO_LOCALIDADE'`.
+
+---
+
+### N. 🏋️ Regra de Bloqueio de Motos para Cargas Pesadas e Consolidadas
+- O limite nominal da **Moto Titan 160 Start (`CRA-5E05`)** é de **$300\text{ kg}$** (e limite seguro urbano de **$285\text{ kg}$**).
+- Quando os pedidos individuais no CSV excedem esse teto (ex: múltiplos sacos de cimento de 50 kg ou paletes de piso $\ge 700\text{ kg}$), o Google OR-Tools **bloqueia automaticamente a alocação de motos**, direcionando toda a carga para os caminhões médios (**Accelo Médio 1 e 2**) ou utilitários (**Kia/HR**), garantindo integridade mecânica e conformidade com as leis de trânsito.
 
 ---
 
@@ -165,8 +182,9 @@ backend/data/
 │   ├── Pedidos_Filtrados_Semana_1_Anonimizado (1).csv  (149 linhas)
 │   ├── Pedidos_Filtrados_Semana_2_Anonimizado (1).csv  (165 linhas)
 │   ├── Pedidos_Filtrados_Semana_3_Anonimizado (1).csv  (172 linhas)
-│   └── Pedidos_Filtrados_Semana_4_Anonimizado (1).csv  (202 linhas)
-│   ↳ Colunas: ['Pedido', 'Data', 'Vendedor', 'Situacao', 'Cidade', 'Logistica', 'Situacao_CSV_Entrega', 'Valor_Pedido', 'Qtd_Itens', 'Itens_Resumo']
+│   ├── Pedidos_Filtrados_Semana_4_Anonimizado (1).csv  (202 linhas)
+│   └── pedido_teste_rua_cep.csv                        (6 paradas urbanas pesadas em Crateús com CEP e IBGE)
+│   ↳ Colunas: ['Pedido', 'Data', 'Vendedor', 'Situacao', 'Cidade', 'Endereco', 'CEP', 'IBGE', 'Logistica', 'Situacao_CSV_Entrega', 'Valor_Pedido', 'Qtd_Itens', 'Itens_Resumo']
 │
 ├── logistica_entregas/
 │   ├── DADOS DE ENTREGAS  - Vendas_Faturamento_Entregas.csv (faturamento, horários de saída e entrega)
@@ -257,6 +275,10 @@ Antes de considerar qualquer tarefa finalizada, o agente deve verificar:
 - [ ] Os pedidos de `RETIRADA` são separados para a fila de balcão e não aparecem na rota do caminhão.
 - [ ] Pedidos `TOPIC` têm sua parada associada ao Ponto das Topics de Crateús.
 - [ ] Pedidos `URGENTE` para o interior respeitam o prazo prioritário de até 3 dias.
-- [ ] As rotas no mapa Leaflet exibem as 5 cores oficiais da frota (🔵 🔴 🟢 🟠 🟡).
+- [ ] As rotas no mapa Leaflet exibem as 5 cores oficiais da frota (🔵 🔴 🟢 🟠 🟡) com suas placas simuladas (`CRA-1A01` a `CRA-5E05`).
 - [ ] A margem de segurança respeita 90% em trechos de serra e 95% em trechos urbanos.
-- [ ] O relatório gerado é persistido na tabela `reports` do banco SQLite.
+- [ ] O relatório gerado é persistido na tabela `reports` do banco SQLite com os resumos das 5 estratégias.
+- [ ] O caminhão recomendado (`recommended_truck`) é devidamente dimensionado com taxa de ocupação e justificativa operacional.
+- [ ] A filtragem por intervalo de datas (`start_date` e `end_date`) exclui pedidos fora do escopo sem corromper o cálculo.
+- [ ] Endereços urbanos e CEPs (IBGE: `2304103`) são resolvidos como `URBANO_DETALHADO`, acionando a malha viária rua a rua.
+- [ ] Cargas com itens individuais acima de 300 kg bloqueiam a moto e são alocadas estritamente para caminhões.

@@ -160,6 +160,22 @@ Permite ao despachante enviar planilhas consolidadas mensais e restringir a aná
 - Pedidos com data fora da faixa são excluídos do grafo de roteamento e da pesagem de carga.
 - Resposta documenta os metadados em `date_filter_applied` (`total_orders_before_filter`, `orders_retained`, `orders_filtered_out`, `applied`).
 
+### K. 📍 Resolução de Logradouros, CEPs e Dados do IBGE (Crateús: `2304103`)
+O sistema integra reconhecimento geográfico postal de Crateús - CE (código IBGE `2304103`):
+- **Faixa de CEPs:** `63700-001` a `63708-899` mapeada rua a rua.
+- **Suporte a Colunas do CSV:** Leitura de `Endereco`, `Logradouro`, `CEP` e `IBGE`.
+- **Modos de Operação:**
+  1. *Sem endereço / só cidade:* `is_intra_city = False`, agrupamento no polo central (`POLO_LOCALIDADE`).
+  2. *Com rua ou CEP:* `is_intra_city = True`, navegação viária rua a rua (`URBANO_DETALHADO`), eliminando ziguezagues dentro da cidade.
+- **Catálogo Local e API ViaCEP:** Dicionário `CRATEUS_CEPS` pré-computado com fallback dinâmico para ViaCEP e cache em memória.
+
+### L. 🏋️ Bloqueio Automático de Motos para Cargas Pesadas
+- O teto máximo de carga da **Moto Titan 160 Start (`CRA-5E05`)** é de **$285\text{ kg}$** no urbano e $300\text{ kg}$ nominal.
+- Se o lote for composto por entregas pesadas individuais ($\ge 300\text{ kg}$), o Google OR-Tools **bloqueia o uso da moto**, alocando toda a carga para os caminhões médios (**Accelo Médio 1 e 2**) ou utilitários leves (**Kia/HR**).
+
+### M. 🧪 Dataset Oficial de Teste Intra-Urbano com Cargas Pesadas (`pedido_teste_rua_cep.csv`)
+Dataset de referência com 6 paradas pesadas em Crateús ($\ge 750\text{ kg}$ por parada, totalizando $5.864\text{ kg}$), testando o roteamento rua a rua e forçando a utilização exclusiva dos caminhões médios Accelo.
+
 ---
 
 ## 5. 🚛 Frota Oficial da Empresa: Veículos, Cores, Emojis, Placas e Capacidades
@@ -282,6 +298,8 @@ Formate em Markdown executivo para compartilhamento no WhatsApp e arquivo no SQL
 
 - **Fase 1:** Configuração da autenticação Admin via `.env` (JWT) e criação do banco SQLite para relatórios.
 - **Fase 2:** Parser de CSV com classificação dos 5 tipos (`RETIRADA`, `URGENTE`, `NORMAL`, `TOPIC`, `PROGRAMADO`) e regras de SLA (11-15h Crateús vs 3d urgente interior).
-- **Fase 3:** Solver Google OR-Tools com a frota oficial: Accelo Médio 1 (🔵), Accelo Médio 2 (🔴), Kia Pequeno (🟢), HR Pequeno (🟠) e Moto Titan 160 Start 300 kg (🟡), com limites de 90% em serras e 95% no plano.
-- **Fase 4:** Prompts LLM e persistência automática dos relatórios calculados no SQLite.
+- **Fase 3:** Solver Google OR-Tools com a frota oficial: Accelo Médio 1 (🔵 `CRA-1A01`), Accelo Médio 2 (🔴 `CRA-2B02`), Kia Pequeno (🟢 `CRA-3C03`), HR Pequeno (🟠 `CRA-4D04`) e Moto Titan 160 Start 300 kg (🟡 `CRA-5E05`), com limites de 90% em serras e 95% no plano.
+- **Fase 4:** Prompts LLM e persistência automática dos relatórios calculados no SQLite com as 5 estratégias e ordem de carregamento LIFO.
 - **Fase 5:** Interface React interativa com tela de login, mapa Leaflet colorido e tela de histórico de relatórios salvos.
+- **Fase 6:** Georreferenciamento de Logradouros Urbanos, CEPs e Dados do IBGE (`2304103`), recomendação inteligente do melhor caminhão (`recommended_truck`), filtro temporal de pedidos (`start_date`/`end_date`) e bloqueio automático de motos para cargas pesadas individuais ($\ge 300\text{ kg}$).
+- **Fase 7:** Suíte de 15 testes de produção em `backend/test_api_suite.py` com validação de ponta a ponta.
