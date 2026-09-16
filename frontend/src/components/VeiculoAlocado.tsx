@@ -11,6 +11,7 @@ import {
   Layers,
   ChevronDown,
   ChevronUp,
+  RotateCw,
 } from 'lucide-react';
 import type { PlanoCarga, Veiculo, VeiculoEmUso } from '../types';
 import { CaminhaoIlustracao } from './CaminhaoIlustracao';
@@ -167,18 +168,39 @@ export const VeiculoAlocado: React.FC<VeiculoAlocadoProps> = ({ plano }) => {
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span
-                      className="chip"
-                      style={{
-                        backgroundColor: v.ocupacaoPercentual > 98 ? '#FEF3C7' : '#DCFCE7',
-                        color: v.ocupacaoPercentual > 98 ? '#92400E' : '#166534',
-                        fontWeight: 700,
-                      }}
-                    >
-                      <Gauge size={13} />
-                      {formatPercentual(v.ocupacaoPercentual)} ocupado
-                    </span>
+                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    {v.tripsCount && v.tripsCount > 1 && (
+                      <span
+                        className="chip"
+                        style={{
+                          backgroundColor: '#EEF2FF',
+                          color: '#4338CA',
+                          fontWeight: 600,
+                        }}
+                      >
+                        <RotateCw size={13} /> {v.tripsCount} viagens
+                      </span>
+                    )}
+                    {(() => {
+                      const isLong = v.perfilSeguranca?.toLowerCase().includes('90') || v.perfilSeguranca?.toLowerCase().includes('serra') || v.perfilSeguranca?.toLowerCase().includes('longa');
+                      const threshold = isLong ? 90 : 95;
+                      const atLimit = v.ocupacaoPercentual >= threshold;
+                      return (
+                        <span
+                          className="chip"
+                          style={{
+                            backgroundColor: atLimit ? '#FEF3C7' : '#DCFCE7',
+                            color: atLimit ? '#92400E' : '#166534',
+                            fontWeight: 700,
+                          }}
+                          title={atLimit ? `Atenção: atingiu o limite de ${threshold}% (${isLong ? 'rota longa/Serra' : 'rota urbana/plano'})` : ''}
+                        >
+                          <Gauge size={13} />
+                          {formatPercentual(v.ocupacaoPercentual)} ocupado
+                          {atLimit && <TriangleAlert size={12} style={{ marginLeft: '3px' }} />}
+                        </span>
+                      );
+                    })()}
                     {v.ordemCarregamento && v.ordemCarregamento.length > 0 && (
                       <button
                         type="button"
@@ -273,13 +295,34 @@ export const VeiculoAlocado: React.FC<VeiculoAlocadoProps> = ({ plano }) => {
                             fontSize: '0.8rem',
                           }}
                         >
-                          <div>
-                            <strong style={{ color: '#1F2937' }}>{item.etiqueta}</strong> · Pedido{' '}
-                            <code style={{ fontFamily: 'monospace', color: '#4B5563' }}>{item.pedidoId}</code> ({item.cidade})
-                            {item.endereco && <span style={{ color: '#9CA3AF' }}> · {item.endereco}</span>}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            {item.tripNumber && (
+                              <span
+                                style={{
+                                  fontSize: '0.7rem',
+                                  padding: '0.15rem 0.4rem',
+                                  borderRadius: '4px',
+                                  backgroundColor: item.tripNumber === 1 ? '#DBEAFE' : '#FEF3C7',
+                                  color: item.tripNumber === 1 ? '#1E40AF' : '#92400E',
+                                  fontWeight: 700,
+                                }}
+                              >
+                                V{item.tripNumber}
+                              </span>
+                            )}
+                            <div>
+                              <strong style={{ color: '#1F2937' }}>{item.etiqueta}</strong> · Pedido{' '}
+                              <code style={{ fontFamily: 'monospace', color: '#4B5563' }}>{item.pedidoId}</code> ({item.cidade})
+                              {item.endereco && <span style={{ color: '#9CA3AF' }}> · {item.endereco}</span>}
+                            </div>
                           </div>
-                          <span style={{ color: '#6B7280', fontWeight: 600 }}>
+                          <span style={{ color: '#6B7280', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                             {formatNumero(item.pesoKg)} kg · {formatNumero(item.volumeM3, 2)} m³
+                            {item.ocupacaoAposEmbarcar != null && (
+                              <span style={{ fontSize: '0.75rem', color: '#4B5563' }}>
+                                ({item.ocupacaoAposEmbarcar}% baú)
+                              </span>
+                            )}
                           </span>
                         </div>
                       ))}
@@ -411,11 +454,22 @@ export const VeiculoAlocado: React.FC<VeiculoAlocadoProps> = ({ plano }) => {
       </div>
 
       {excedido && (
-        <div className="alert alert-error">
-          <Gauge size={16} />
+        <div
+          className="alert"
+          style={{
+            backgroundColor: '#EEF2FF',
+            border: '1px solid #C7D2FE',
+            color: '#3730A3',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.6rem',
+            padding: '0.85rem 1.1rem',
+            borderRadius: '8px',
+          }}
+        >
+          <RotateCw size={18} style={{ flexShrink: 0 }} />
           <span>
-            A carga deste plano ultrapassa os limites desta unidade. Redistribua os pedidos ou
-            escolha um veículo maior.
+            <strong>Carga programada em múltiplas viagens:</strong> O volume total excede a capacidade de uma única viagem desta unidade. A operação foi automaticamente dividida em viagens consecutivas com segurança (ver detalhes na aba <em>Ordem de Carregamento</em>).
           </span>
         </div>
       )}

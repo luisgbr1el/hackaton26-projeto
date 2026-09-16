@@ -10,10 +10,12 @@ export interface ItemCarga {
   entrega?: number;
   destino: string;
   zona: Zona;
-  /** Acumulados depois de embarcar este item. */
+  /** Acumulados depois de embarcar este item nesta viagem. */
   pesoAcumulado: number;
   volumeAcumulado: number;
   ocupacao: number;
+  /** Número da viagem do veículo (1, 2, etc.) */
+  viagem: number;
 }
 
 export const ZONAS: Record<Zona, string> = {
@@ -30,6 +32,10 @@ const densidade = (pedido: PedidoAlocado): number =>
  * embarca primeiro a carga da última parada (vai para o fundo) e por último a
  * da primeira entrega (fica junto à porta). Dentro de cada parada, o material
  * mais denso entra antes, para ficar embaixo da pilha.
+ *
+ * Se a carga total ultrapassar a capacidade segura da unidade, divide
+ * automaticamente em múltiplas viagens (Viagem 1, Viagem 2...), zerando a
+ * cubagem do baú para cada ciclo e garantindo ocupação máxima de 100%.
  */
 export const montarOrdem = (plano: PlanoCarga): ItemCarga[] => {
   const paradasComEntrega = plano.rota.paradas.filter((parada) => parada.pedidos > 0);
@@ -64,23 +70,49 @@ export const montarOrdem = (plano: PlanoCarga): ItemCarga[] => {
       zona: 'porta' as Zona,
     }));
 
-  let peso = 0;
-  let volume = 0;
+  const capPeso = plano.veiculo.capacidadePesoKg || 4800;
+  const capVolume = plano.veiculo.capacidadeVolumeM3 || 2.45;
 
-  return [...sequencia, ...avulsos].map((item, indice) => {
-    peso += item.pedido.pesoKg;
-    volume += item.pedido.volumeM3;
+  let viagemAtual = 1;
+  let pesoViagem = 0;
+  let volumeViagem = 0;
+  let ordemNaViagem = 1;
 
-    return {
+  return [...sequencia, ...avulsos].map((item) => {
+    // Se adicionar este item ultrapassar a capacidade do baú na viagem atual, inicia próxima viagem
+    if (
+      (pesoViagem + item.pedido.pesoKg > capPeso ||
+        volumeViagem + item.pedido.volumeM3 > capVolume) &&
+      pesoViagem > 0
+    ) {
+      viagemAtual += 1;
+      pesoViagem = 0;
+      volumeViagem = 0;
+      ordemNaViagem = 1;
+    }
+
+    pesoViagem += item.pedido.pesoKg;
+    volumeViagem += item.pedido.volumeM3;
+
+    const ocupacaoPercentual = Math.min(
+      100,
+      Math.round(
+        Math.max((pesoViagem / capPeso) * 100, (volumeViagem / capVolume) * 100) * 10,
+      ) / 10,
+    );
+
+    const resultado: ItemCarga = {
       ...item,
-      ordem: indice + 1,
-      pesoAcumulado: peso,
-      volumeAcumulado: volume,
-      ocupacao: Math.max(
-        (peso / plano.veiculo.capacidadePesoKg) * 100,
-        (volume / plano.veiculo.capacidadeVolumeM3) * 100,
-      ),
+      ordem: ordemNaViagem,
+      viagem: viagemAtual,
+      pesoAcumulado: Math.round(pesoViagem * 10) / 10,
+      volumeAcumulado: Math.round(volumeViagem * 100) / 100,
+      ocupacao: ocupacaoPercentual,
     };
+
+    ordemNaViagem += 1;
+    return resultado;
   });
 };
+
 

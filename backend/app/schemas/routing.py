@@ -71,6 +71,8 @@ class RouteStopDTO(BaseModel):
     address: Optional[str] = None
     is_intra_city: bool = False
     route_type: str = "POLO_LOCALIDADE"
+    trip_number: int = 1
+    occupancy_after_loading_percent: float = 0.0
 
 
 class VehicleFuelDTO(BaseModel):
@@ -112,6 +114,7 @@ class VehicleRouteDTO(BaseModel):
     stops: List[RouteStopDTO]
     geojson: Dict[str, Any]
     manifest_markdown: str
+    trips_count: int = 1
 
 
 class StrategySummaryCardDTO(BaseModel):
@@ -185,6 +188,8 @@ class LoadingOrderItemDTO(BaseModel):
     volume_m3: float
     value_reais: float
     items_summary: str
+    trip_number: int = 1
+    occupancy_after_loading_percent: float = 0.0
 
 
 class VehicleSummaryDTO(BaseModel):
@@ -207,6 +212,7 @@ class VehicleSummaryDTO(BaseModel):
     stops_count: int
     fuel_info: Optional[VehicleFuelDTO] = None
     loading_order: List[LoadingOrderItemDTO] = []
+    trips_count: int = 1
 
 
 class DefinedRouteStrategyDTO(BaseModel):

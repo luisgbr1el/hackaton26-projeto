@@ -131,6 +131,8 @@ export interface LoadingOrderItemDTO {
   volume_m3: number;
   value_reais: number;
   items_summary: string;
+  trip_number?: number;
+  occupancy_after_loading_percent?: number;
 }
 
 export interface VehicleSummaryDTO {
@@ -141,7 +143,6 @@ export interface VehicleSummaryDTO {
   hex_color: string;
   emoji: string;
   is_recommended: boolean;
-  recommendation_reason?: string;
   effective_capacity_kg: number;
   effective_capacity_m3: number;
   safety_factor_label: string;
@@ -153,6 +154,7 @@ export interface VehicleSummaryDTO {
   stops_count: number;
   fuel_info?: VehicleFuelDTO;
   loading_order: LoadingOrderItemDTO[];
+  trips_count?: number;
 }
 
 export interface DefinedRouteStrategyDTO {
@@ -701,8 +703,11 @@ export const mapDispatchSummaryToPlanoCarga = (
         endereco: lo.address,
         pesoKg: lo.weight_kg,
         volumeM3: lo.volume_m3,
+        tripNumber: lo.trip_number || 1,
+        ocupacaoAposEmbarcar: lo.occupancy_after_loading_percent,
       })),
       rota: vRoute ? buildRotaVeiculo(vRoute) : undefined,
+      tripsCount: v.trips_count || 1,
     };
   });
 

@@ -169,6 +169,8 @@ export interface ItemOrdemCarregamentoVeiculo {
   endereco?: string;
   pesoKg: number;
   volumeM3: number;
+  tripNumber?: number;
+  ocupacaoAposEmbarcar?: number;
 }
 
 export interface VeiculoEmUso {
@@ -190,6 +192,8 @@ export interface VeiculoEmUso {
   ordemCarregamento?: ItemOrdemCarregamentoVeiculo[];
   /** Rota individual deste veículo */
   rota?: Rota;
+  /** Quantidade de viagens programadas para este veículo */
+  tripsCount?: number;
 }
 
 export interface PlanoCarga {

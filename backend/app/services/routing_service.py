@@ -933,32 +933,73 @@ class RoutingService:
             except Exception:
                 pass
 
+            vid = r.get("vehicle_id", 0)
+            v_conf = fleet_service.get_vehicle_by_id(vid)
+            v_plate = r.get("license_plate") or (v_conf.license_plate if v_conf else "CRA-0000")
+            is_rec = bool(r.get("is_recommended", False) or (vid == getattr(rec_truck_dto, "vehicle_id", -1)))
+            rec_reason = r.get("recommendation_reason") or (rec_truck_dto.reason if is_rec and rec_truck_dto else None)
+
+            eff_cap = int(r.get("effective_capacity_kg", v_conf.urbano_weight_kg if v_conf else 4560))
+            eff_vol = float(r.get("effective_capacity_m3", v_conf.urbano_volume_m3 if v_conf else 2.33))
+            tot_capacity_kg_all += eff_cap
+
             v_stops = r.get("stops", [])
             sorted_stops = sorted(v_stops, key=lambda s: s.get("loading_order_position", 999))
 
             v_loading_items: List[LoadingOrderItemDTO] = []
             v_tot_val = 0.0
 
+            # Controle de viagens múltiplas do veículo:
+            # Caso o volume ou peso ultrapasse a capacidade segura (90% serra / 95% plano),
+            # permite fazer mais de uma viagem e zera o baú para a próxima viagem.
+            current_trip = 1
+            trip_weight = 0.0
+            trip_vol = 0.0
+            pos_in_trip = 1
+
             for s in sorted_stops:
                 val = float(s.get("value_reais", 0.0))
+                w = float(s.get("weight_kg", 0.0))
+                vol = float(s.get("volume_m3", 0.0))
+
+                # Se adicionar este item ultrapassar o limite seguro, aloca em uma nova viagem
+                if (trip_weight + w > eff_cap or trip_vol + vol > eff_vol) and trip_weight > 0:
+                    current_trip += 1
+                    trip_weight = 0.0
+                    trip_vol = 0.0
+                    pos_in_trip = 1
+
+                trip_weight += w
+                trip_vol += vol
                 v_tot_val += val
                 tot_val_all += val
 
+                occ_after = min(100.0, round(max(trip_weight / max(eff_cap, 1), trip_vol / max(eff_vol, 0.01)) * 100.0, 1))
+
+                label_base = s.get("loading_order_label", f"{pos_in_trip}º a carregar")
+                if current_trip > 1 or len(sorted_stops) > 6:
+                    trip_label = f"Viagem {current_trip} · {label_base}"
+                else:
+                    trip_label = label_base
+
                 item_dto = LoadingOrderItemDTO(
-                    loading_order_position=s.get("loading_order_position", 1),
-                    loading_order_label=s.get("loading_order_label", f"{s.get('loading_order_position', 1)}º a carregar"),
+                    loading_order_position=pos_in_trip,
+                    loading_order_label=trip_label,
                     stop_number=s.get("stop_number", 1),
                     order_id=s.get("order_id", ""),
                     city=s.get("city", "CRATEUS"),
                     address=s.get("address"),
                     delivery_type=s.get("delivery_type", "NORMAL"),
-                    weight_kg=float(s.get("weight_kg", 0.0)),
-                    volume_m3=float(s.get("volume_m3", 0.0)),
+                    weight_kg=w,
+                    volume_m3=vol,
                     value_reais=val,
                     items_summary=s.get("items_summary", ""),
+                    trip_number=current_trip,
+                    occupancy_after_loading_percent=occ_after,
                 )
                 v_loading_items.append(item_dto)
                 all_loading_orders.append(item_dto)
+                pos_in_trip += 1
 
             fuel_dict = r.get("fuel_info")
             fuel_dto = VehicleFuelDTO(**fuel_dict) if fuel_dict else None
@@ -966,14 +1007,13 @@ class RoutingService:
                 tot_fuel_l_all += fuel_dto.estimated_consumption_liters
                 tot_fuel_cost_all += fuel_dto.estimated_cost_reais
 
-            eff_cap = int(r.get("effective_capacity_kg", 1))
-            tot_capacity_kg_all += eff_cap
-
-            vid = r.get("vehicle_id", 0)
-            v_conf = fleet_service.get_vehicle_by_id(vid)
-            v_plate = r.get("license_plate") or (v_conf.license_plate if v_conf else "CRA-0000")
-            is_rec = bool(r.get("is_recommended", False) or (vid == getattr(rec_truck_dto, "vehicle_id", -1)))
-            rec_reason = r.get("recommendation_reason") or (rec_truck_dto.reason if is_rec and rec_truck_dto else None)
+            # Recalcular a ocupação usando a capacidade NOMINAL do veículo para garantir 0-100%
+            raw_weight = float(r.get("total_weight_kg", 0.0))
+            nominal_cap = v_conf.nominal_weight_kg if v_conf else eff_cap
+            if nominal_cap > 0:
+                occ_pct = min(100.0, round((raw_weight / (nominal_cap * current_trip) * 100.0), 1))
+            else:
+                occ_pct = min(100.0, float(r.get("occupancy_rate_percent", 0.0)))
 
             vehicles_summary.append(
                 VehicleSummaryDTO(
@@ -986,21 +1026,30 @@ class RoutingService:
                     is_recommended=is_rec,
                     recommendation_reason=rec_reason,
                     effective_capacity_kg=eff_cap,
-                    effective_capacity_m3=float(r.get("effective_capacity_m3", 0.0)),
+                    effective_capacity_m3=float(r.get("effective_capacity_m3", eff_vol)),
                     safety_factor_label=r.get("safety_factor_label", "95%"),
-                    total_weight_kg=float(r.get("total_weight_kg", 0.0)),
+                    total_weight_kg=raw_weight,
                     total_volume_m3=float(r.get("total_volume_m3", 0.0)),
                     total_value_reais=round(v_tot_val, 2),
-                    occupancy_rate_percent=float(r.get("occupancy_rate_percent", 0.0)),
+                    occupancy_rate_percent=occ_pct,
                     total_distance_km=float(r.get("total_distance_km", 0.0)),
                     stops_count=len(v_stops),
                     fuel_info=fuel_dto,
                     loading_order=v_loading_items,
+                    trips_count=current_trip,
                 )
             )
 
         tot_vol = sum(v.total_volume_m3 for v in vehicles_summary)
-        overall_occ = round((tot_weight / tot_capacity_kg_all * 100.0), 1) if tot_capacity_kg_all > 0 else 0.0
+        # Usar capacidade nominal total da frota para o cálculo geral — nunca passar de 100%
+        nominal_fleet_cap_kg = sum(
+            (fleet_service.get_vehicle_by_id(v.vehicle_id).nominal_weight_kg
+             if fleet_service.get_vehicle_by_id(v.vehicle_id) else v.effective_capacity_kg)
+            for v in vehicles_summary
+        )
+        denom = nominal_fleet_cap_kg if nominal_fleet_cap_kg > 0 else tot_capacity_kg_all
+        overall_occ = min(100.0, round((tot_weight / denom * 100.0), 1)) if denom > 0 else 0.0
+
 
         tot_batch_val = float(target_strat.get("total_batch_val", 0.0))
         unassigned_val = float(target_strat.get("unassigned_value_reais", 0.0))

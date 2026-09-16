@@ -151,6 +151,7 @@ export const RelatorioImpressao: React.FC<RelatorioImpressaoProps> = ({ plano })
         <table className="relatorio-tabela">
           <thead>
             <tr>
+              <th>Viagem</th>
               <th>Ordem</th>
               <th>Posição</th>
               <th>Pedido</th>
@@ -162,7 +163,8 @@ export const RelatorioImpressao: React.FC<RelatorioImpressaoProps> = ({ plano })
           </thead>
           <tbody>
             {itens.map((item) => (
-              <tr key={item.pedido.pedido}>
+              <tr key={`${item.viagem}-${item.pedido.pedido}`}>
+                <td>Viagem {item.viagem}</td>
                 <td>{item.ordem}</td>
                 <td>{ZONAS[item.zona]}</td>
                 <td>{item.pedido.pedido}</td>

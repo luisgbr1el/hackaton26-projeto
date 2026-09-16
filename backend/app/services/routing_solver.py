@@ -48,6 +48,8 @@ class RouteStop:
         cumulative_distance_km: float,
         loading_order_position: int,
         loading_order_label: str,
+        trip_number: int = 1,
+        occupancy_after_loading_percent: float = 0.0,
     ):
         self.stop_number = stop_number
         self.order = order
@@ -55,6 +57,8 @@ class RouteStop:
         self.cumulative_distance_km = cumulative_distance_km
         self.loading_order_position = loading_order_position
         self.loading_order_label = loading_order_label
+        self.trip_number = trip_number
+        self.occupancy_after_loading_percent = occupancy_after_loading_percent
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -75,6 +79,8 @@ class RouteStop:
             "address": self.order.address,
             "is_intra_city": self.order.is_intra_city,
             "route_type": self.order.route_type,
+            "trip_number": self.trip_number,
+            "occupancy_after_loading_percent": self.occupancy_after_loading_percent,
         }
 
 
@@ -96,6 +102,7 @@ class VehicleRouteResult:
         coordinates_path: List[Tuple[float, float]],
         geojson_feature: Dict[str, Any],
         manifest_markdown: str = "",
+        trips_count: int = 1,
     ):
         self.vehicle = vehicle
         self.stops = stops
@@ -112,6 +119,7 @@ class VehicleRouteResult:
         self.coordinates_path = coordinates_path
         self.geojson_feature = geojson_feature
         self.manifest_markdown = manifest_markdown
+        self.trips_count = max(trips_count, max((s.trip_number for s in stops), default=1))
         self.intra_city_stops_count = sum(1 for s in stops if s.order.is_intra_city)
         self.inter_city_stops_count = sum(1 for s in stops if not s.order.is_intra_city)
         self.fuel_info = self.vehicle.calculate_fuel_metrics(self.total_distance_km)
@@ -136,6 +144,7 @@ class VehicleRouteResult:
             "has_urgent": self.has_urgent,
             "stops": [s.to_dict() for s in self.stops],
             "stops_count": len(self.stops),
+            "trips_count": self.trips_count,
             "intra_city_stops_count": self.intra_city_stops_count,
             "inter_city_stops_count": self.inter_city_stops_count,
             "fuel_info": self.fuel_info,
@@ -359,6 +368,27 @@ class RoutingSolver:
             if not raw_stops:
                 continue
 
+            effective_cap_kg = vehicle.serra_weight_kg if (is_mountain and vehicle.operates_in_mountain) else vehicle.urbano_weight_kg
+            effective_cap_m3 = vehicle.serra_volume_m3 if (is_mountain and vehicle.operates_in_mountain) else vehicle.urbano_volume_m3
+            safety_factor = 0.90 if is_mountain else 0.95
+            safety_label = "90% (Serra / Longa Distância)" if is_mountain else "95% (Plano / Urbano)"
+
+            # Particionamento em viagens para evitar sobrecarga e garantir limite seguro (90% ou 95%)
+            curr_trip = 1
+            curr_trip_w = 0.0
+            curr_trip_v = 0.0
+            trip_assignments = []
+
+            for ord_item, leg_km in raw_stops:
+                if (curr_trip_w + ord_item.weight_kg > effective_cap_kg or curr_trip_v + ord_item.volume_m3 > effective_cap_m3) and curr_trip_w > 0:
+                    curr_trip += 1
+                    curr_trip_w = 0.0
+                    curr_trip_v = 0.0
+                curr_trip_w += ord_item.weight_kg
+                curr_trip_v += ord_item.volume_m3
+                occ_stop = min(100.0, round(max(curr_trip_w / max(effective_cap_kg, 1), curr_trip_v / max(effective_cap_m3, 0.01)) * 100.0, 1))
+                trip_assignments.append((curr_trip, occ_stop))
+
             total_stops_count = len(raw_stops)
             stops: List[RouteStop] = []
             running_dist_km = 0.0
@@ -370,12 +400,14 @@ class RoutingSolver:
                 running_dist_km += leg_km
                 stop_num = stop_idx + 1
                 loading_pos = total_stops_count - stop_idx
+                t_num, occ_stop = trip_assignments[stop_idx]
+
                 if loading_pos == 1:
-                    loading_label = "1º a carregar (Fundo do Baú)"
+                    loading_label = f"Viagem {t_num} · 1º a carregar (Fundo do Baú)" if curr_trip > 1 else "1º a carregar (Fundo do Baú)"
                 elif loading_pos == total_stops_count:
-                    loading_label = f"{loading_pos}º a carregar (Porta do Baú)"
+                    loading_label = f"Viagem {t_num} · {loading_pos}º a carregar (Porta do Baú)" if curr_trip > 1 else f"{loading_pos}º a carregar (Porta do Baú)"
                 else:
-                    loading_label = f"{loading_pos}º a carregar (Meio do Baú)"
+                    loading_label = f"Viagem {t_num} · {loading_pos}º a carregar (Meio do Baú)" if curr_trip > 1 else f"{loading_pos}º a carregar (Meio do Baú)"
 
                 stops.append(
                     RouteStop(
@@ -385,6 +417,8 @@ class RoutingSolver:
                         cumulative_distance_km=running_dist_km,
                         loading_order_position=loading_pos,
                         loading_order_label=loading_label,
+                        trip_number=t_num,
+                        occupancy_after_loading_percent=occ_stop,
                     )
                 )
 
@@ -402,9 +436,16 @@ class RoutingSolver:
 
             effective_cap_kg = vehicle.serra_weight_kg if (is_mountain and vehicle.operates_in_mountain) else vehicle.urbano_weight_kg
             effective_cap_m3 = vehicle.serra_volume_m3 if (is_mountain and vehicle.operates_in_mountain) else vehicle.urbano_volume_m3
+            safety_factor = 0.90 if is_mountain else 0.95
             safety_label = "90% (Serra / Longa Distância)" if is_mountain else "95% (Plano / Urbano)"
 
-            occupancy_percent = (total_weight / effective_cap_kg * 100.0) if effective_cap_kg > 0 else 0.0
+            # Ocupação calculada sobre a capacidade nominal real do veículo (não sobre a efetiva/limitada).
+            # Isso garante que o percentual reflete o uso físico real e nunca ultrapassa 100%.
+            nominal_cap_kg = vehicle.nominal_weight_kg
+            occupancy_percent = min(
+                100.0,
+                (total_weight / nominal_cap_kg * 100.0) if nominal_cap_kg > 0 else 0.0
+            )
             has_urgent = any(s.order.delivery_type == "URGENTE" for s in stops)
             has_topics = any(s.order.delivery_type == "TOPIC" for s in stops)
 

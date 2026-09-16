@@ -22,9 +22,9 @@ export const obterImagemVeiculo = (veiculo: Veiculo): string => {
 
   // 1. Mapeamento por ID
   if (id === '0' || id === 'acc-01' || id === 'carro01') return carro01;
-  if (id === '1' || id === 'acc-02' || id === 'carro02') return carro02;
-  if (id === '2' || id === 'kia-01' || id === 'carro03') return carro03;
-  if (id === '3' || id === 'hr-01' || id === 'carro04') return carro04;
+  if (id === '1' || id === 'acc-02' || id === 'carro02') return carro03;
+  if (id === '2' || id === 'kia-01' || id === 'carro03') return carro04;
+  if (id === '3' || id === 'hr-01' || id === 'carro04') return carro02;
   if (id === '4' || id === 'moto-01' || id === 'moto') return motoImg;
 
   // 2. Mapeamento por Nome ou Modelo
