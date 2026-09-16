@@ -1,7 +1,7 @@
 import React from 'react';
-import { MapPin, Route as RouteIcon, Clock, Flag } from 'lucide-react';
+import { MapPin, Route as RouteIcon, Flag } from 'lucide-react';
 import type { Rota } from '../types';
-import { formatDuracao, formatNumero } from '../utils/format';
+import { formatNumero } from '../utils/format';
 
 interface MapaRotaProps {
   rota: Rota;
@@ -33,8 +33,13 @@ export const MapaRota: React.FC<MapaRotaProps> = ({
 
   const tracado = pontos.map((p) => `${p.cx},${p.cy}`).join(' ');
 
+  const corLinha = rota.corVeiculo || '#000';
+
   return (
-    <section className="card mapa-card">
+    <section
+      className="card mapa-card"
+      style={rota.corVeiculo ? { borderLeft: `5px solid ${rota.corVeiculo}` } : undefined}
+    >
       <div className="card-head">
         <div>
           <h2 className="card-title">{titulo}</h2>
@@ -44,15 +49,18 @@ export const MapaRota: React.FC<MapaRotaProps> = ({
           <span className="chip chip-muted">
             <RouteIcon size={14} /> {formatNumero(rota.distanciaTotalKm)} km
           </span>
-          <span className="chip chip-muted">
-            <Clock size={14} /> {formatDuracao(rota.tempoEstimadoMin)}
-          </span>
+          <span className="chip chip-muted">{rota.paradas.length - 1} paradas</span>
         </div>
       </div>
 
       <div className="mapa-viewport">
         {mapaReal ?? (
-          <svg viewBox={`0 0 ${LARGURA} ${ALTURA}`} className="mapa-svg" role="img" aria-label="Mapa esquemático da rota">
+          <svg
+            viewBox={`0 0 ${LARGURA} ${ALTURA}`}
+            className="mapa-svg"
+            role="img"
+            aria-label="Mapa esquemático da rota"
+          >
             <defs>
               <pattern id="grade" width="40" height="40" patternUnits="userSpaceOnUse">
                 <path d="M40 0H0V40" fill="none" stroke="#D8D8D8" strokeWidth="1" />
@@ -62,7 +70,14 @@ export const MapaRota: React.FC<MapaRotaProps> = ({
             <rect width={LARGURA} height={ALTURA} fill="#EFEFEF" />
             <rect width={LARGURA} height={ALTURA} fill="url(#grade)" />
 
-            <polyline points={tracado} fill="none" stroke="#000" strokeWidth="7" strokeLinecap="round" strokeLinejoin="round" />
+            <polyline
+              points={tracado}
+              fill="none"
+              stroke={corLinha}
+              strokeWidth="7"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
             <polyline
               points={tracado}
               fill="none"
@@ -77,7 +92,14 @@ export const MapaRota: React.FC<MapaRotaProps> = ({
               const ultimo = indice === pontos.length - 1;
               return (
                 <g key={ponto.ordem}>
-                  <circle cx={ponto.cx} cy={ponto.cy} r="17" fill={ultimo ? '#FFF206' : '#000'} stroke="#000" strokeWidth="3" />
+                  <circle
+                    cx={ponto.cx}
+                    cy={ponto.cy}
+                    r="17"
+                    fill={ultimo ? '#FFF206' : corLinha}
+                    stroke={corLinha}
+                    strokeWidth="3"
+                  />
                   <text
                     x={ponto.cx}
                     y={ponto.cy + 5}
@@ -88,7 +110,14 @@ export const MapaRota: React.FC<MapaRotaProps> = ({
                   >
                     {ponto.ordem}
                   </text>
-                  <text x={ponto.cx} y={ponto.cy - 26} textAnchor="middle" fontSize="14" fontWeight="600" fill="#000">
+                  <text
+                    x={ponto.cx}
+                    y={ponto.cy - 26}
+                    textAnchor="middle"
+                    fontSize="14"
+                    fontWeight="600"
+                    fill="#000"
+                  >
                     {ponto.cidade}
                   </text>
                 </g>
@@ -104,7 +133,9 @@ export const MapaRota: React.FC<MapaRotaProps> = ({
       <ol className="paradas">
         {rota.paradas.map((parada, indice) => (
           <li key={parada.ordem} className="parada">
-            <span className={`parada-ordem${indice === rota.paradas.length - 1 ? ' is-final' : ''}`}>
+            <span
+              className={`parada-ordem${indice === rota.paradas.length - 1 ? ' is-final' : ''}`}
+            >
               {indice === rota.paradas.length - 1 ? <Flag size={13} /> : parada.ordem}
             </span>
             <div className="parada-info">
@@ -116,7 +147,6 @@ export const MapaRota: React.FC<MapaRotaProps> = ({
             <div className="parada-dados">
               <span>{parada.pedidos} pedidos</span>
               <span>{formatNumero(parada.distanciaKm)} km</span>
-              {parada.janelaEntrega && <span className="parada-janela">{parada.janelaEntrega}</span>}
             </div>
           </li>
         ))}

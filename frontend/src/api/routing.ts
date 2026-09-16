@@ -403,7 +403,7 @@ export const mapDispatchSummaryToPlanoCarga = (
     };
   }
 
-  // 2. Extrair paradas da rota
+  // 2. Rota consolidada (todas as paradas de todos os veículos) para fallback
   const todasParadasRota: RouteStopDTO[] = [];
   if (summary.routes && summary.routes.length > 0) {
     summary.routes.forEach((r) => {
@@ -415,7 +415,6 @@ export const mapDispatchSummaryToPlanoCarga = (
 
   const coords = normalizarCoordenadas(todasParadasRota);
 
-  // Parada de origem (CD Nobre Lar Crateús)
   const paradasMapeadas: ParadaRota[] = [
     {
       ordem: 1,
@@ -423,20 +422,12 @@ export const mapDispatchSummaryToPlanoCarga = (
       referencia: 'CD Nobre Lar · Partida',
       pedidos: 0,
       distanciaKm: 0,
-      janelaEntrega: '07:00 - Saída',
       x: 16,
       y: 50,
     },
   ];
 
-  let kmAcumulado = 0;
   todasParadasRota.forEach((stop, index) => {
-    kmAcumulado += stop.distance_from_prev_km || 0;
-    const horaEstimadaMin = 7 * 60 + Math.round((kmAcumulado / 45) * 60) + (index + 1) * 20;
-    const h = Math.floor(horaEstimadaMin / 60) % 24;
-    const m = horaEstimadaMin % 60;
-    const janela = `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
-
     const ref = stop.address
       ? stop.address
       : stop.is_intra_city
@@ -449,7 +440,6 @@ export const mapDispatchSummaryToPlanoCarga = (
       referencia: ref,
       pedidos: 1,
       distanciaKm: Math.round(stop.distance_from_prev_km * 10) / 10,
-      janelaEntrega: `Previsto: ${janela}`,
       x: coords[index]?.x ?? Math.min(85, 20 + index * 12),
       y: coords[index]?.y ?? Math.min(80, 30 + (index % 3) * 20),
     });
@@ -468,6 +458,48 @@ export const mapDispatchSummaryToPlanoCarga = (
     distanciaTotalKm: Math.round(summary.total_distance_km * 10) / 10,
     tempoEstimadoMin,
     paradas: paradasMapeadas,
+  };
+
+  // 2b. Rotas individuais por veículo (a partir de summary.routes do backend)
+  const buildRotaVeiculo = (vRoute: VehicleRouteDTO): Rota => {
+    const stopsCoords = normalizarCoordenadas(vRoute.stops);
+    const paradas: ParadaRota[] = [
+      {
+        ordem: 1,
+        cidade: 'Crateús',
+        referencia: 'CD Nobre Lar · Partida',
+        pedidos: 0,
+        distanciaKm: 0,
+        x: 16,
+        y: 50,
+      },
+    ];
+    vRoute.stops.forEach((stop, idx) => {
+      const ref = stop.address
+        ? stop.address
+        : stop.is_intra_city
+          ? 'Entrega Urbana'
+          : 'Polo Regional';
+      paradas.push({
+        ordem: idx + 2,
+        cidade: stop.city,
+        referencia: ref,
+        pedidos: 1,
+        distanciaKm: Math.round(stop.distance_from_prev_km * 10) / 10,
+        x: stopsCoords[idx]?.x ?? Math.min(85, 20 + idx * 12),
+        y: stopsCoords[idx]?.y ?? Math.min(80, 30 + (idx % 3) * 20),
+      });
+    });
+
+    const tempoVeiculo = Math.round((vRoute.total_distance_km / 45) * 60 + vRoute.stops.length * 15);
+    return {
+      origem: 'CD Nobre Lar · Crateús, CE',
+      distanciaTotalKm: Math.round(vRoute.total_distance_km * 10) / 10,
+      tempoEstimadoMin: tempoVeiculo,
+      paradas,
+      nomeVeiculo: vRoute.vehicle_name,
+      corVeiculo: vRoute.hex_color || '#2563EB',
+    };
   };
 
   // 3. Resumo da Carga
@@ -637,32 +669,42 @@ export const mapDispatchSummaryToPlanoCarga = (
   });
 
   // 7. Todos os veículos mobilizados e utilizados na operação
-  const veiculosEmUso: VeiculoEmUso[] = (summary.vehicles || []).map((v) => ({
-    id: v.vehicle_id,
-    nome: v.vehicle_name,
-    placa: v.license_plate,
-    cor: v.color,
-    hexColor: v.hex_color || '#2563EB',
-    emoji: v.emoji || '🚚',
-    pesoKg: Math.round(v.total_weight_kg * 10) / 10,
-    capacidadeKg: v.effective_capacity_kg,
-    volumeM3: Math.round(v.total_volume_m3 * 100) / 100,
-    capacidadeM3: Math.round(v.effective_capacity_m3 * 100) / 100,
-    ocupacaoPercentual: Math.round(v.occupancy_rate_percent * 10) / 10,
-    distanciaKm: Math.round(v.total_distance_km * 10) / 10,
-    paradasCount: v.stops_count,
-    valorReais: Math.round(v.total_value_reais * 100) / 100,
-    perfilSeguranca: v.safety_factor_label,
-    ordemCarregamento: v.loading_order?.map((lo) => ({
-      posicao: lo.loading_order_position,
-      etiqueta: lo.loading_order_label,
-      pedidoId: lo.order_id,
-      cidade: lo.city,
-      endereco: lo.address,
-      pesoKg: lo.weight_kg,
-      volumeM3: lo.volume_m3,
-    })),
-  }));
+  // Cria um mapa de vehicle_id -> VehicleRouteDTO para lookup rápido
+  const rotasPorVeiculoId = new Map<number, VehicleRouteDTO>();
+  (summary.routes || []).forEach((vRoute) => {
+    rotasPorVeiculoId.set(vRoute.vehicle_id, vRoute);
+  });
+
+  const veiculosEmUso: VeiculoEmUso[] = (summary.vehicles || []).map((v) => {
+    const vRoute = rotasPorVeiculoId.get(v.vehicle_id);
+    return {
+      id: v.vehicle_id,
+      nome: v.vehicle_name,
+      placa: v.license_plate,
+      cor: v.color,
+      hexColor: v.hex_color || '#2563EB',
+      emoji: v.emoji || '🚚',
+      pesoKg: Math.round(v.total_weight_kg * 10) / 10,
+      capacidadeKg: v.effective_capacity_kg,
+      volumeM3: Math.round(v.total_volume_m3 * 100) / 100,
+      capacidadeM3: Math.round(v.effective_capacity_m3 * 100) / 100,
+      ocupacaoPercentual: Math.round(v.occupancy_rate_percent * 10) / 10,
+      distanciaKm: Math.round(v.total_distance_km * 10) / 10,
+      paradasCount: v.stops_count,
+      valorReais: Math.round(v.total_value_reais * 100) / 100,
+      perfilSeguranca: v.safety_factor_label,
+      ordemCarregamento: v.loading_order?.map((lo) => ({
+        posicao: lo.loading_order_position,
+        etiqueta: lo.loading_order_label,
+        pedidoId: lo.order_id,
+        cidade: lo.city,
+        endereco: lo.address,
+        pesoKg: lo.weight_kg,
+        volumeM3: lo.volume_m3,
+      })),
+      rota: vRoute ? buildRotaVeiculo(vRoute) : undefined,
+    };
+  });
 
   return {
     id: String(summary.report_id),

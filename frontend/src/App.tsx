@@ -256,16 +256,40 @@ export const App: React.FC = () => {
 
           {!processando &&
             aba === 'rota' &&
-            (plano && rotaExibida ? (
+            (plano && (plano.veiculosEmUso?.some((v) => v.rota) || rotaExibida) ? (
               <>
-                <MapaRota
-                  rota={rotaExibida}
-                  titulo={
-                    !opcaoAtiva || opcaoAtiva.criterio === 'melhor'
-                      ? 'Melhor rota calculada'
-                      : `Rota de ${opcaoAtiva.rotulo.toLowerCase()}`
-                  }
-                />
+                {/* Se há múltiplos veículos com rotas individuais: exibe um mapa por veículo */}
+                {plano.veiculosEmUso && plano.veiculosEmUso.some((v) => v.rota) ? (
+                  <>
+                    <div style={{ marginBottom: '0.75rem' }}>
+                      <h2 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#111827', margin: 0 }}>
+                        Rotas por Veículo — {plano.veiculosEmUso.filter((v) => v.rota).length} veículos em operação
+                      </h2>
+                      <p style={{ fontSize: '0.875rem', color: '#6B7280', margin: '0.25rem 0 0' }}>
+                        Cada caminhão tem sua própria rota calculada pelo otimizador.
+                      </p>
+                    </div>
+                    {plano.veiculosEmUso
+                      .filter((v) => v.rota)
+                      .map((v) => (
+                        <MapaRota
+                          key={v.id}
+                          rota={v.rota!}
+                          titulo={`Rota — ${v.nome} (${v.paradasCount} paradas · ${v.distanciaKm} km)`}
+                        />
+                      ))}
+                  </>
+                ) : (
+                  /* Veículo único ou sem dados de rota individuais: exibe rota consolidada */
+                  <MapaRota
+                    rota={rotaExibida!}
+                    titulo={
+                      !opcaoAtiva || opcaoAtiva.criterio === 'melhor'
+                        ? 'Melhor rota calculada'
+                        : `Rota de ${opcaoAtiva.rotulo.toLowerCase()}`
+                    }
+                  />
+                )}
                 {opcoesRota.length > 0 && (
                   <OpcoesRota
                     opcoes={opcoesRota}

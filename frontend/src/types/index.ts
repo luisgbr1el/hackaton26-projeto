@@ -67,6 +67,10 @@ export interface Rota {
   distanciaTotalKm: number;
   tempoEstimadoMin: number;
   paradas: ParadaRota[];
+  /** Nome do veículo dono desta rota (apenas quando por veículo) */
+  nomeVeiculo?: string;
+  /** Cor de identificação do veículo */
+  corVeiculo?: string;
 }
 
 export interface ResumoCarga {
@@ -184,6 +188,8 @@ export interface VeiculoEmUso {
   valorReais: number;
   perfilSeguranca: string;
   ordemCarregamento?: ItemOrdemCarregamentoVeiculo[];
+  /** Rota individual deste veículo */
+  rota?: Rota;
 }
 
 export interface PlanoCarga {

@@ -1,4 +1,5 @@
 import React from 'react';
+import logoPadrao from '../assets/logonova.svg';
 import type { PlanoCarga } from '../types';
 import { combustivelDaRota, ocupacaoGeral } from '../utils/carga';
 import { montarOrdem, ZONAS } from '../utils/carregamento';
@@ -30,7 +31,7 @@ export const RelatorioImpressao: React.FC<RelatorioImpressaoProps> = ({ plano })
   return (
     <div className="relatorio">
       <header className="relatorio-topo">
-        <img className="relatorio-logo" src="/LOGO.svg" alt="Nobre Lar" />
+        <img className="relatorio-logo" src={logoPadrao} alt="Nobre Lar" />
         <div className="relatorio-identificacao">
           <h1>Plano de carga {plano.id}</h1>
           <p>

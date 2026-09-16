@@ -12,7 +12,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
-import type { PlanoCarga, VeiculoEmUso } from '../types';
+import type { PlanoCarga, Veiculo, VeiculoEmUso } from '../types';
 import { CaminhaoIlustracao } from './CaminhaoIlustracao';
 import { combustivelDaRota, ocupacaoGeral, excedeCapacidade } from '../utils/carga';
 import { formatMoeda, formatNumero, formatPercentual } from '../utils/format';
@@ -106,6 +106,20 @@ export const VeiculoAlocado: React.FC<VeiculoAlocadoProps> = ({ plano }) => {
             const estaAberto = veiculoAberto === v.id;
             const corBorda = v.hexColor || '#2563EB';
 
+            const veiculoItem: Veiculo = {
+              id: String(v.id),
+              nome: v.nome,
+              modelo: v.nome,
+              tipo: v.nome.toLowerCase().includes('moto') ? 'moto' : 'pequeno',
+              porte: 'Operacional',
+              perfil: v.perfilSeguranca,
+              cor: corBorda,
+              capacidadePesoKg: v.capacidadeKg,
+              capacidadeVolumeM3: v.capacidadeM3,
+              tanqueLitros: 100,
+              consumoKmPorLitro: 5,
+            };
+
             return (
               <div
                 key={v.id}
@@ -127,8 +141,22 @@ export const VeiculoAlocado: React.FC<VeiculoAlocadoProps> = ({ plano }) => {
                     gap: '0.75rem',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <span style={{ fontSize: '1.75rem' }}>{v.emoji}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+                    <div
+                      style={{
+                        width: '68px',
+                        height: '44px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                        backgroundColor: '#F3F4F6',
+                        borderRadius: '6px',
+                        padding: '4px',
+                      }}
+                    >
+                      <CaminhaoIlustracao veiculo={veiculoItem} miniatura />
+                    </div>
                     <div>
                       <h3 style={{ fontSize: '1.05rem', fontWeight: 700, margin: 0, color: '#111827' }}>
                         {v.nome}
