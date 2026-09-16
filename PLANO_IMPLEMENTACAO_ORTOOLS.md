@@ -100,6 +100,15 @@ CREATE TABLE IF NOT EXISTS reports (
 - **Serras, Trechos Rurais e Longas Distâncias:** *Buriti dos Montes, Poranga, Ipaporanga, Monte Nebo, Ibiapaba* $\rightarrow$ **Máximo de 90%** da capacidade do veículo por segurança mecânica, frenagem e subidas acidentadas.
 - **Rotas Urbanas, Planas e Proximidades:** *Crateús Urbano e distritos planos vizinhos* $\rightarrow$ **Até 95%** da capacidade do veículo.
 
+### D. 📦 Ordem de Carregamento Físico no Caminhão (Precedência da Rota Total)
+A montagem da carga no baú/carroceria do veículo segue uma regra física estrita após a rota ser calculada pelo Google OR-Tools:
+1. **Cálculo Prévio da Rota Total:** Primeiro o sistema calcula a rota completa do início ao fim (Parada 1 $\rightarrow$ Parada 2 $\rightarrow$ ... $\rightarrow$ Parada $N$).
+2. **Posicionamento por Precedência Reversa:**
+   - **1º a ser colocado no caminhão (Fundo do Baú):** A entrega **mais distante** (última parada da rota: Parada $N$).
+   - **Posições intermediárias (Meio do Baú):** As entregas intermediárias em ordem decrescente ($N-1$, $N-2$, ...).
+   - **Último a ser colocado no caminhão (Porta / Saída do Baú):** A entrega **mais próxima** (primeira parada da rota: Parada 1).
+3. **Benefício Operacional:** O motorista descarrega diretamente na porta sem necessidade de remanejamento de cargas pesadas durante o trajeto.
+
 ---
 
 ## 5. 🚛 Frota Oficial da Empresa: Veículos, Cores, Emojis e Capacidades
