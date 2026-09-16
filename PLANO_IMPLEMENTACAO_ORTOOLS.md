@@ -4,7 +4,7 @@ Este documento define a arquitetura e o plano de implementação do sistema de r
 - **Autenticação Administrativa Segura:** Login único de Admin com credenciais hardcoded via `.env`.
 - **Persistência de Relatórios em SQLite:** Armazenamento do histórico de manifestos, métricas e trajetos calculados em banco local.
 - **Matriz Oficial dos 5 Tipos de Entrega:** Incluindo regra de **`URGENTE` para fora da cidade com SLA acelerado de até 3 dias** (vs 11–15h em Crateús).
-- **Frota Oficial Colorida com Emojis:** 🔵 Accelo Grande 1, 🔴 Accelo Grande 2, 🟢 Kia Pequeno, 🟠 HR Pequeno e 🟡 **Moto com capacidade ajustada para $300\text{ kg}$**.
+- **Frota Oficial Colorida com Emojis:** 🔵 Accelo Médio 1, 🔴 Accelo Médio 2, 🟢 Kia Pequeno, 🟠 HR Pequeno e 🟡 **Moto com capacidade ajustada para $300\text{ kg}$**.
 - **Regra de Segurança de Carga:** 90% para trechos de serra e longas distâncias vs 95% para trajetos planos e urbanos.
 
 ---
@@ -92,7 +92,7 @@ CREATE TABLE IF NOT EXISTS reports (
     - ⚠️ **Limite Máximo:** até **10 dias**
 
 ### B. Custo Mínimo e Viabilidade Econômica (Consolidação de Carga):
-- Caminhões pesados (**Accelo Grande 1 e 2**) só devem partir para o interior se atingirem **taxa de ocupação mínima** ($\ge 60\%$ da capacidade) OU se o valor dos pedidos cobrir o combustível.
+- Caminhões médios (**Accelo Médio 1 e 2**) só devem partir para o interior se atingirem **taxa de ocupação mínima** ($\ge 60\%$ da capacidade) OU se o valor dos pedidos cobrir o combustível.
 - **Papel do Pedido URGENTE no Custo Mínimo:** São os pedidos com status **`URGENTE`** que são utilizados estrategicamente para **completar a carga** do caminhão! A presença de pedidos urgentes atua como o gatilho econômico e operacional que viabiliza a saída do veículo para a rota, preenchendo a capacidade ociosa com prioridade de despacho.
 - Se o pedido normal mais antigo na região atingir $\ge 8$ dias, o despacho torna-se obrigatório para não estourar o limite de 10 dias de SLA.
 
@@ -117,8 +117,8 @@ A frota oficial conta com **5 veículos**, cada um com nome e cor atribuídos pa
 
 | Emoji | Cor | Código Hex | Nome Oficial do Veículo | Perfil de Operação | Capacidade Nominal | Limite Serra (**90%**) | Limite Urbano (**95%**) |
 | :---: | :---: | :---: | :--- | :--- | :---: | :---: | :---: |
-| 🔵 | **Azul** | `#2563EB` | **Accelo Grande 1** | Pesado / Rotas de Interior (Eixo Oeste/Sul) | $4.800\text{ kg} \mid 2,45\text{ m}^3$ | **$4.320\text{ kg} \mid 2,20\text{ m}^3$** | **$4.560\text{ kg} \mid 2,33\text{ m}^3$** |
-| 🔴 | **Vermelho** | `#DC2626` | **Accelo Grande 2** | Pesado / Rotas de Interior (Eixo Leste/Serra) | $4.800\text{ kg} \mid 2,45\text{ m}^3$ | **$4.320\text{ kg} \mid 2,20\text{ m}^3$** | **$4.560\text{ kg} \mid 2,33\text{ m}^3$** |
+| 🔵 | **Azul** | `#2563EB` | **Accelo Médio 1** | Médio / Rotas de Interior (Eixo Oeste/Sul) | $4.800\text{ kg} \mid 2,45\text{ m}^3$ | **$4.320\text{ kg} \mid 2,20\text{ m}^3$** | **$4.560\text{ kg} \mid 2,33\text{ m}^3$** |
+| 🔴 | **Vermelho** | `#DC2626` | **Accelo Médio 2** | Médio / Rotas de Interior (Eixo Leste/Serra) | $4.800\text{ kg} \mid 2,45\text{ m}^3$ | **$4.320\text{ kg} \mid 2,20\text{ m}^3$** | **$4.560\text{ kg} \mid 2,33\text{ m}^3$** |
 | 🟢 | **Verde** | `#16A34A` | **Kia Pequeno** | Médio / Cargas Intermediárias e Interior Próximo | $1.700\text{ kg} \mid 2,18\text{ m}^3$ | **$1.530\text{ kg} \mid 1,96\text{ m}^3$** | **$1.615\text{ kg} \mid 2,07\text{ m}^3$** |
 | 🟠 | **Laranja** | `#EA580C` | **HR Pequeno** | Médio / Urgências e Cargas Médias Urbanas | $1.700\text{ kg} \mid 2,18\text{ m}^3$ | **$1.530\text{ kg} \mid 1,96\text{ m}^3$** | **$1.615\text{ kg} \mid 2,07\text{ m}^3$** |
 | 🟡 | **Amarelo** | `#EAB308` | **Moto** | Expresso / Ponto das Topics & Urgências Urbanas | **$300\text{ kg} \mid 0,38\text{ m}^3$** | *(Não vai para serra)* | **$285\text{ kg} \mid 0,36\text{ m}^3$** |
@@ -172,8 +172,8 @@ Você é o Especialista em Logística da Distribuidora em Crateús-CE.
 Configure os parâmetros para o solucionador Google OR-Tools considerando:
 
 1. Frota Disponível:
-   - 🔵 Azul: Accelo Grande 1 (4.800 kg)
-   - 🔴 Vermelho: Accelo Grande 2 (4.800 kg)
+   - 🔵 Azul: Accelo Médio 1 (4.800 kg)
+   - 🔴 Vermelho: Accelo Médio 2 (4.800 kg)
    - 🟢 Verde: Kia Pequeno (1.700 kg)
    - 🟠 Laranja: HR Pequeno (1.700 kg)
    - 🟡 Amarelo: Moto (300 kg | 0.38 m³)
@@ -231,6 +231,6 @@ Formate em Markdown executivo para compartilhamento no WhatsApp e arquivo no SQL
 
 - **Fase 1:** Configuração da autenticação Admin via `.env` (JWT) e criação do banco SQLite para relatórios.
 - **Fase 2:** Parser de CSV com classificação dos 5 tipos (`RETIRADA`, `URGENTE`, `NORMAL`, `TOPIC`, `PROGRAMADO`) e regras de SLA (11-15h Crateús vs 3d urgente interior).
-- **Fase 3:** Solver Google OR-Tools com a frota oficial: Accelo Grande 1 (🔵), Accelo Grande 2 (🔴), Kia Pequeno (🟢), HR Pequeno (🟠) e Moto 300 kg (🟡), com limites de 90% em serras e 95% no plano.
+- **Fase 3:** Solver Google OR-Tools com a frota oficial: Accelo Médio 1 (🔵), Accelo Médio 2 (🔴), Kia Pequeno (🟢), HR Pequeno (🟠) e Moto 300 kg (🟡), com limites de 90% em serras e 95% no plano.
 - **Fase 4:** Prompts LLM e persistência automática dos relatórios calculados no SQLite.
 - **Fase 5:** Interface React interativa com tela de login, mapa Leaflet colorido e tela de histórico de relatórios salvos.

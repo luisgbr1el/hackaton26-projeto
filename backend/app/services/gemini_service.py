@@ -21,8 +21,9 @@ class GeminiService:
         self.model_name = settings.GEMINI_MODEL or "gemini-3.8-flash"
         self.live_model_name = settings.GEMINI_LIVE_MODEL or "gemini-3.8-live"
         # Fallback models in case of temporary 503 spikes in high demand
-        self.fallback_models = [self.model_name, "gemini-3.7-flash", "gemini-3.6-flash"]
+        self.fallback_models = [self.model_name, "gemini-flash-latest", "gemini-3.5-flash"]
         self._client = None
+        self._circuit_breaker_until = 0.0
 
         if GENAI_AVAILABLE and self.api_key:
             try:
@@ -38,7 +39,8 @@ class GeminiService:
 
     def _generate_with_fallback(self, prompt: str, is_json: bool = False) -> Optional[str]:
         """Tenta gerar conteúdo com o modelo principal e faz fallback transparente se houver 503/sobrecarga."""
-        if not self._client:
+        import time
+        if not self._client or time.time() < self._circuit_breaker_until:
             return None
 
         for model in self.fallback_models:
@@ -57,7 +59,11 @@ class GeminiService:
                 if response and response.text:
                     return response.text.strip()
             except Exception as e:
-                logger.warning(f"Model {model} returned error ({e}), tentando próximo modelo na fila...")
+                err_str = str(e)
+                logger.warning(f"Model {model} returned error ({err_str[:120]}), tentando próximo modelo na fila...")
+                if "503" in err_str or "UNAVAILABLE" in err_str or "quota" in err_str.lower():
+                    # Temporarily avoid spamming API for 60 seconds
+                    self._circuit_breaker_until = time.time() + 60.0
                 continue
         return None
 
@@ -77,7 +83,7 @@ class GeminiService:
             "route_topography_profile": "serra_distante" if is_mountain else "urbana_plana",
             "safety_capacity_factor": 0.90 if is_mountain else 0.95,
             "allocated_vehicles": [
-                {"vehicle_id": 0, "name": "Accelo Grande 1", "color": "Azul", "emoji": "🔵", "capacity_kg": 4320 if is_mountain else 4560},
+                {"vehicle_id": 0, "name": "Accelo Médio 1", "color": "Azul", "emoji": "🔵", "capacity_kg": 4320 if is_mountain else 4560},
                 {"vehicle_id": 1, "name": "HR Pequeno", "color": "Laranja", "emoji": "🟠", "capacity_kg": 1530 if is_mountain else 1615},
             ],
             "topic_hub_address": "Terminal Rodoviário de Crateús, CE",
@@ -94,8 +100,8 @@ Você é o Especialista em Logística da Distribuidora em Crateús-CE.
 Configure os parâmetros para o solucionador Google OR-Tools considerando:
 
 ### Frota Oficial da Empresa:
-- 🔵 Azul: Accelo Grande 1 (4.800 kg nominal) - Pesado / Interior
-- 🔴 Vermelho: Accelo Grande 2 (4.800 kg nominal) - Pesado / Interior
+- 🔵 Azul: Accelo Médio 1 (4.800 kg nominal) - Médio / Interior
+- 🔴 Vermelho: Accelo Médio 2 (4.800 kg nominal) - Médio / Interior
 - 🟢 Verde: Kia Pequeno (1.700 kg nominal) - Médio
 - 🟠 Laranja: HR Pequeno (1.700 kg nominal) - Médio / Urbano
 - 🟡 Amarelo: Moto (300 kg nominal | 0.38 m³) - Cargas pequenas, Ponto das Topics e Crateús

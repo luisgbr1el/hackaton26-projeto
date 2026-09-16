@@ -62,8 +62,8 @@ Sua missão é manter, evoluir e garantir a integridade de um sistema que:
 
 | Emoji | Cor | Código Hex | Nome Oficial do Veículo | Capacidade Nominal | Limite Serra (**90%**) | Limite Urbano (**95%**) | Perfil de Operação |
 | :---: | :---: | :---: | :--- | :---: | :---: | :---: | :--- |
-| 🔵 | **Azul** | `#2563EB` | **Accelo Grande 1** | $4.800\text{ kg} \mid 2,45\text{ m}^3$ | **$4.320\text{ kg}$** | **$4.560\text{ kg}$** | Pesado / Interior (Eixo Oeste/Sul) |
-| 🔴 | **Vermelho** | `#DC2626` | **Accelo Grande 2** | $4.800\text{ kg} \mid 2,45\text{ m}^3$ | **$4.320\text{ kg}$** | **$4.560\text{ kg}$** | Pesado / Interior (Eixo Leste/Serra) |
+| 🔵 | **Azul** | `#2563EB` | **Accelo Médio 1** | $4.800\text{ kg} \mid 2,45\text{ m}^3$ | **$4.320\text{ kg}$** | **$4.560\text{ kg}$** | Médio / Interior (Eixo Oeste/Sul) |
+| 🔴 | **Vermelho** | `#DC2626` | **Accelo Médio 2** | $4.800\text{ kg} \mid 2,45\text{ m}^3$ | **$4.320\text{ kg}$** | **$4.560\text{ kg}$** | Médio / Interior (Eixo Leste/Serra) |
 | 🟢 | **Verde** | `#16A34A` | **Kia Pequeno** | $1.700\text{ kg} \mid 2,18\text{ m}^3$ | **$1.530\text{ kg}$** | **$1.615\text{ kg}$** | Médio / Cargas Intermediárias |
 | 🟠 | **Laranja** | `#EA580C` | **HR Pequeno** | $1.700\text{ kg} \mid 2,18\text{ m}^3$ | **$1.530\text{ kg}$** | **$1.615\text{ kg}$** | Médio / Cargas Médias e Urbanas |
 | 🟡 | **Amarelo** | `#EAB308` | **Moto** | **$300\text{ kg} \mid 0,38\text{ m}^3$** | *(Não vai para serra)* | **$285\text{ kg}$** | Expresso / Ponto das Topics & Crateús |
@@ -136,7 +136,7 @@ Ao implementar ou ajustar prompts de LLM no sistema, siga rigorosamente este pad
 ### 2. Prompt de Manifesto Operacional do Motorista
 - **Entrada:** Resultado calculado pelo OR-Tools + arquivo CSV + dados da frota.
 - **Saída:** Texto em Markdown limpo e humanizado contendo:
-  - Emoji e Cor oficial do veículo (ex: `🔵 Accelo Grande 1`).
+  - Emoji e Cor oficial do veículo (ex: `🔵 Accelo Médio 1`).
   - Alerta de Lotação Segura (percentual atingido vs teto de 90% serra ou 95% plano).
   - Horário limite das Topics caso haja parada no terminal.
   - Alerta destacado de pedidos `URGENTE` (SLA de 11–15h em Crateús ou até 3 dias no interior).
