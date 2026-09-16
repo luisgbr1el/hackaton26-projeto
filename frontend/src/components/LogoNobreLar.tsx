@@ -1,4 +1,5 @@
 import React from 'react';
+import logoPadrao from '../assets/logonova.svg';
 
 export type VarianteLogo = 'escura' | 'clara';
 
@@ -12,17 +13,8 @@ interface LogoNobreLarProps {
   variante?: VarianteLogo;
 }
 
-/**
- * Logo oficial do Nobre Lar.
- *
- * Os arquivos ficam em `public/` e são servidos na raiz do site:
- *   /LOGO.svg         versão original, para fundo claro
- *   /LOGO-branca.svg  mesma arte com a assinatura em branco, para fundo escuro
- *
- * Para trocar a arte, basta substituir esses dois arquivos.
- */
 const ARQUIVO: Record<VarianteLogo, string> = {
-  escura: '/LOGO.svg',
+  escura: logoPadrao,
   clara: '/LOGO-branca.svg',
 };
 
@@ -32,8 +24,15 @@ export const LogoNobreLar: React.FC<LogoNobreLarProps> = ({
 }) => (
   <img
     className="logo-nobrelar"
-    src={ARQUIVO[variante]}
+    src={ARQUIVO[variante] || logoPadrao}
     alt="Nobre Lar"
     style={{ height: altura }}
+    onError={(e) => {
+      const target = e.currentTarget;
+      if (target.src !== logoPadrao) {
+        target.src = logoPadrao;
+      }
+    }}
   />
 );
+
