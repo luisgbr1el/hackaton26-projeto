@@ -157,6 +157,35 @@ export interface OpcaoRota {
   metricas: MetricasRota;
 }
 
+export interface ItemOrdemCarregamentoVeiculo {
+  posicao: number;
+  etiqueta: string;
+  pedidoId: string;
+  cidade: string;
+  endereco?: string;
+  pesoKg: number;
+  volumeM3: number;
+}
+
+export interface VeiculoEmUso {
+  id: number;
+  nome: string;
+  placa: string;
+  cor: string;
+  hexColor: string;
+  emoji: string;
+  pesoKg: number;
+  capacidadeKg: number;
+  volumeM3: number;
+  capacidadeM3: number;
+  ocupacaoPercentual: number;
+  distanciaKm: number;
+  paradasCount: number;
+  valorReais: number;
+  perfilSeguranca: string;
+  ordemCarregamento?: ItemOrdemCarregamentoVeiculo[];
+}
+
 export interface PlanoCarga {
   id: string;
   geradoEm: string;
@@ -176,4 +205,6 @@ export interface PlanoCarga {
   reportId?: number;
   /** Veículo recomendado pelo sistema para esta carga. */
   recomendacao?: Recomendacao;
+  /** Todos os veículos mobilizados e utilizados na operação */
+  veiculosEmUso?: VeiculoEmUso[];
 }

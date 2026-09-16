@@ -176,7 +176,27 @@ class RoutingService:
             "qty": find_col(["QTD_ITENS", "QTD", "QUANTIDADE"]),
             "items": find_col(["ITENS_RESUMO", "RESUMO_ITENS", "ITENS", "PRODUTOS"]),
             "date": find_col(["DATA", "DATA_PEDIDO"]),
+            "volume": find_col(["VOLUME_M3", "VOLUME", "CUBAGEM", "CUBAGEM_M3", "M3", "VOL_M3", "VOL"]),
+            "dimensions": find_col(["DIMENSOES", "DIMENSÕES", "MEDIDAS", "DIMENSAO", "DIMENSÃO", "TAMANHO"]),
+            "length": find_col(["COMPRIMENTO", "COMPRIMENTO_CM", "COMPRIMENTO_M", "COMP", "COMP_CM"]),
+            "width": find_col(["LARGURA", "LARGURA_CM", "LARGURA_M", "LARG", "LARG_CM"]),
+            "height": find_col(["ALTURA", "ALTURA_CM", "ALTURA_M", "ALT", "ALT_CM"]),
+            "weight": find_col(["PESO", "PESO_KG", "PESO_BRUTO", "PESO_TOTAL", "PESO_LIQUIDO"]),
         }
+
+    @staticmethod
+    def _parse_float_safe(val: Any) -> Optional[float]:
+        if val is None or pd.isna(val):
+            return None
+        s = str(val).replace(",", ".").strip()
+        match = re.search(r"[-+]?\d+(?:\.\d+)?", s)
+        if match:
+            try:
+                v = float(match.group())
+                return v if v > 0 else None
+            except ValueError:
+                return None
+        return None
 
     def generate_preview(
         self,
@@ -231,7 +251,23 @@ class RoutingService:
             delivery_types_count[dtype] = delivery_types_count.get(dtype, 0) + 1
             cities_set.add(loc_res.base_city)
 
-            weight, volume = catalog_service.estimate_order_metrics(items_str, qtd_itens=qty)
+            direct_vol = self._parse_float_safe(row[cols["volume"]]) if cols.get("volume") else None
+            direct_w = self._parse_float_safe(row[cols["weight"]]) if cols.get("weight") else None
+            dim_str = str(row[cols["dimensions"]]).strip() if cols.get("dimensions") and not pd.isna(row[cols["dimensions"]]) else None
+            c_len = self._parse_float_safe(row[cols["length"]]) if cols.get("length") else None
+            c_wid = self._parse_float_safe(row[cols["width"]]) if cols.get("width") else None
+            c_hei = self._parse_float_safe(row[cols["height"]]) if cols.get("height") else None
+
+            weight, volume = catalog_service.estimate_order_metrics(
+                items_str,
+                qtd_itens=qty,
+                direct_weight=direct_w,
+                direct_volume=direct_vol,
+                length=c_len,
+                width=c_wid,
+                height=c_hei,
+                dimensions_str=dim_str,
+            )
             estimated_weight += weight
 
             item_dto = PreviewOrderDTO(
@@ -533,7 +569,24 @@ class RoutingService:
             )
 
             cities_in_batch.add(loc_res.base_city)
-            weight, volume = catalog_service.estimate_order_metrics(items_str, qtd_itens=qty)
+
+            direct_vol = self._parse_float_safe(row[cols["volume"]]) if cols.get("volume") else None
+            direct_w = self._parse_float_safe(row[cols["weight"]]) if cols.get("weight") else None
+            dim_str = str(row[cols["dimensions"]]).strip() if cols.get("dimensions") and not pd.isna(row[cols["dimensions"]]) else None
+            c_len = self._parse_float_safe(row[cols["length"]]) if cols.get("length") else None
+            c_wid = self._parse_float_safe(row[cols["width"]]) if cols.get("width") else None
+            c_hei = self._parse_float_safe(row[cols["height"]]) if cols.get("height") else None
+
+            weight, volume = catalog_service.estimate_order_metrics(
+                items_str,
+                qtd_itens=qty,
+                direct_weight=direct_w,
+                direct_volume=direct_vol,
+                length=c_len,
+                width=c_wid,
+                height=c_hei,
+                dimensions_str=dim_str,
+            )
 
             if dtype == "RETIRADA":
                 pickup_orders.append({
@@ -671,13 +724,25 @@ class RoutingService:
                 recommendation_reason=rec_truck_dto.reason,
             )
 
+            s_stops_count = sum(len(r.stops) for r in dto_list)
             s_tot_dist = sum(r.total_distance_km for r in dto_list)
+            if s_tot_dist <= 0 and s_stops_count > 0:
+                s_tot_dist = round(s_stops_count * 1.8 + 5.0, 1)
+
             s_tot_weight = sum(r.total_weight_kg for r in dto_list)
             s_tot_vol = sum(r.total_volume_m3 for r in dto_list)
             s_tot_val = sum(sum(st.value_reais for st in r.stops) for r in dto_list)
-            s_time_hours = round(s_tot_dist / 45.0, 1)  # Estimativa média 45 km/h operacional
+            
+            # Estimativa de tempo operacional: tempo de deslocamento (45 km/h) + 15 min por entrega realizada
+            s_time_hours = round((s_tot_dist / 45.0) + (s_stops_count * 15.0 / 60.0), 1)
+            if s_time_hours < 0.5 and s_stops_count > 0:
+                s_time_hours = 0.5
+
+            if (fuel_l <= 0.0 or fuel_cost <= 0.0) and s_tot_dist > 0:
+                fuel_l = round(s_tot_dist / 6.0, 2)
+                fuel_cost = round(fuel_l * 6.10, 2)
+
             s_vehicles = [f"{r.emoji} {r.vehicle_name} ({r.license_plate})" for r in dto_list]
-            s_stops_count = sum(len(r.stops) for r in dto_list)
 
             # Resumo executivo leve para retorno no JSON do optimize
             strategies_summary_list.append(

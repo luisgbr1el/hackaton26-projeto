@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { UploadCloud, FileSpreadsheet, X, Sparkles, AlertCircle, PlayCircle } from 'lucide-react';
+import { UploadCloud, FileSpreadsheet, X, Sparkles, AlertCircle } from 'lucide-react';
 import { formatTamanhoArquivo } from '../utils/format';
 import { lerPeriodoDoArquivo } from '../utils/csv';
 import type { ResumoArquivo } from '../utils/csv';
@@ -9,10 +9,10 @@ import type { Periodo } from '../types';
 
 interface UploadPedidosProps {
   onProcessar: (arquivo: File, periodo?: Periodo) => void;
-  onExemplo: () => void;
   onLimpar: () => void;
   processando: boolean;
   erro: string | null;
+  onAvisoErro?: (msg: string) => void;
 }
 
 const EXTENSOES_ACEITAS = ['.csv', '.xlsx', '.xls'];
@@ -22,10 +22,10 @@ const extensaoValida = (nome: string): boolean =>
 
 export const UploadPedidos: React.FC<UploadPedidosProps> = ({
   onProcessar,
-  onExemplo,
   onLimpar,
   processando,
   erro,
+  onAvisoErro,
 }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const [arquivo, setArquivo] = useState<File | null>(null);
@@ -38,7 +38,9 @@ export const UploadPedidos: React.FC<UploadPedidosProps> = ({
   const selecionar = async (selecionado: File | undefined) => {
     if (!selecionado) return;
     if (!extensaoValida(selecionado.name)) {
-      setAviso('Formato não suportado. Envie um arquivo .csv, .xlsx ou .xls.');
+      const msg = 'Formato não suportado. Por favor, envie um arquivo com extensão .csv, .xlsx ou .xls.';
+      setAviso(msg);
+      onAvisoErro?.(msg);
       return;
     }
     setAviso(null);
@@ -182,17 +184,8 @@ export const UploadPedidos: React.FC<UploadPedidosProps> = ({
           <Sparkles size={16} />
           {processando ? 'Calculando plano...' : 'Gerar plano de carga'}
         </button>
-        <button
-          type="button"
-          className="btn btn-secondary"
-          onClick={onExemplo}
-          disabled={processando}
-        >
-          <PlayCircle size={16} />
-          Ver plano de exemplo
-        </button>
         <span className="upload-note">
-          O cálculo de rota e alocação é executado no servidor.
+          Envie o arquivo CSV/XLSX para calcular a rota e alocação da frota.
         </span>
       </div>
     </section>

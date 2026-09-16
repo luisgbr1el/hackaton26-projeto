@@ -477,9 +477,16 @@ class GeocodingService:
                 if node_i["base_city"] == node_j["base_city"]:
                     # Se AMBOS têm apenas a cidade (sem endereço detalhado)
                     if not node_i["is_intra_city"] and not node_j["is_intra_city"]:
-                        # Mesmo polo: distância zero entre entregas da mesma cidade!
-                        dist_matrix[i][j] = 0
-                        time_matrix[i][j] = 0
+                        if i == 0 or j == 0:
+                            # Deslocamento entre o CD (pátio) e o centro urbano da cidade
+                            d_m = 3500
+                            t_s = int((3.5 / AVG_URBAN_SPEED_KMH) * 3600)
+                        else:
+                            # Deslocamento urbano médio entre endereços de clientes distintos
+                            d_m = 1800
+                            t_s = int((1.8 / AVG_URBAN_SPEED_KMH) * 3600)
+                        dist_matrix[i][j] = d_m
+                        time_matrix[i][j] = t_s
                     else:
                         # Pelo menos um tem endereço específico dentro da cidade:
                         # Calcular percurso viário real pelas ruas da cidade

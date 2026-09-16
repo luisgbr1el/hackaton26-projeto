@@ -15,6 +15,7 @@ import { PedidosAlocados } from './components/PedidosAlocados';
 import { RelatorioImpressao } from './components/RelatorioImpressao';
 import { OpcoesRota } from './components/OpcoesRota';
 import { SeletorEstrategias } from './components/SeletorEstrategias';
+import { ModalErro } from './components/ModalErro';
 import { gerarPlanoCargaCompleto } from './api/planoCarga';
 import { getFleetApi } from './api/fleet';
 import {
@@ -24,12 +25,10 @@ import {
   type OptimizeResponse,
 } from './api/routing';
 import { FROTA } from './mocks/frota';
-import { planoDemo, planoDemoPara } from './mocks/planoCarga';
 import { aplicarVeiculo } from './utils/carga';
 import { encerrarSessao, lerSessao, salvarSessao } from './auth/admin';
 import type { CriterioRota, Periodo, PlanoCarga, Veiculo } from './types';
 import {
-  FlaskConical,
   Loader2,
   Route,
   Truck,
@@ -48,7 +47,7 @@ export const App: React.FC = () => {
   const [processando, setProcessando] = useState(false);
   const [alternandoEstrategia, setAlternandoEstrategia] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
-  const [modoDemo, setModoDemo] = useState(false);
+  const [erroModal, setErroModal] = useState<string | null>(null);
   const [criterioRota, setCriterioRota] = useState<CriterioRota>('melhor');
 
   useEffect(() => {
@@ -74,17 +73,7 @@ export const App: React.FC = () => {
     setPlano(null);
     setReportId(null);
     setOptimizeResp(null);
-    setModoDemo(false);
     setAba('home');
-  };
-
-  const carregarExemplo = (periodo?: Periodo, veiculo?: Veiculo) => {
-    setErro(null);
-    setPlano(veiculo ? planoDemoPara(veiculo, periodo) : planoDemo(periodo));
-    setModoDemo(true);
-    setReportId(null);
-    setOptimizeResp(null);
-    setCriterioRota('melhor');
   };
 
   const processar = async (arquivo: File, periodo?: Periodo) => {
@@ -95,7 +84,6 @@ export const App: React.FC = () => {
       setPlano(resultado.plano);
       setReportId(resultado.optimizeResp.report_id);
       setOptimizeResp(resultado.optimizeResp);
-      setModoDemo(false);
       setCriterioRota('melhor');
     } catch (err: any) {
       console.error('Erro na otimização de rotas:', err);
@@ -103,7 +91,9 @@ export const App: React.FC = () => {
         err?.response?.data?.detail ||
         err?.message ||
         'Não foi possível gerar o plano de carga. Verifique se a API do backend está disponível.';
-      setErro(typeof detalhe === 'string' ? detalhe : JSON.stringify(detalhe));
+      const msg = typeof detalhe === 'string' ? detalhe : JSON.stringify(detalhe);
+      setErro(msg);
+      setErroModal(msg);
       setPlano(null);
       setReportId(null);
       setOptimizeResp(null);
@@ -117,7 +107,7 @@ export const App: React.FC = () => {
    */
   const trocarCriterioRota = async (criterio: CriterioRota) => {
     setCriterioRota(criterio);
-    if (reportId && !modoDemo) {
+    if (reportId) {
       setAlternandoEstrategia(true);
       try {
         const stratBackend = mapaEstrategiaParaBackend[criterio] || 'recomendada';
@@ -129,8 +119,10 @@ export const App: React.FC = () => {
           criterio,
         );
         setPlano(novoPlano);
-      } catch (err) {
+      } catch (err: any) {
         console.warn('Erro ao alternar estratégia de rota no backend:', err);
+        const detalhe = err?.response?.data?.detail || err?.message || 'Erro ao carregar a estratégia selecionada.';
+        setErroModal(typeof detalhe === 'string' ? detalhe : JSON.stringify(detalhe));
       } finally {
         setAlternandoEstrategia(false);
       }
@@ -138,15 +130,11 @@ export const App: React.FC = () => {
   };
 
   /**
-   * Troca a unidade da frota. Sem plano carregado (ou no modo demonstração)
-   * mostra o plano de exemplo da unidade; com dados reais apenas recalcula a
+   * Troca a unidade da frota ativa. Com dados reais apenas recalcula a
    * ocupação sobre os limites do veículo escolhido.
    */
   const selecionarVeiculo = (veiculo: Veiculo) => {
-    if (!plano) {
-      carregarExemplo(undefined, veiculo);
-      return;
-    }
+    if (!plano) return;
     setPlano(aplicarVeiculo(plano, veiculo));
   };
 
@@ -155,7 +143,7 @@ export const App: React.FC = () => {
     setReportId(null);
     setOptimizeResp(null);
     setErro(null);
-    setModoDemo(false);
+    setErroModal(null);
     setCriterioRota('melhor');
   };
 
@@ -196,10 +184,10 @@ export const App: React.FC = () => {
           {aba === 'home' && (
             <UploadPedidos
               onProcessar={processar}
-              onExemplo={() => carregarExemplo()}
               onLimpar={limpar}
               processando={processando}
               erro={erro}
+              onAvisoErro={(msg) => setErroModal(msg)}
             />
           )}
 
@@ -207,7 +195,7 @@ export const App: React.FC = () => {
             <section className="card estado-card">
               <Loader2 size={26} className="spin" />
               <h3>Montando o plano de carga</h3>
-              <p>Otimizando rota, alocando pedidos e calculando a ocupação do veículo.</p>
+              <p>Otimizando rota, alocando pedidos e calculando a ocupação da frota.</p>
             </section>
           )}
 
@@ -215,17 +203,14 @@ export const App: React.FC = () => {
             <>
               <div className="resultado-head">
                 <div>
-                  <h2 className="resultado-titulo">Plano {plano.id}</h2>
+                  <h2 className="resultado-titulo">Plano de Carga #{plano.id}</h2>
                   <span className="resultado-data">
-                    {plano.veiculo.nome} · gerado em{' '}
-                    {new Date(plano.geradoEm).toLocaleString('pt-BR')}
+                    {plano.veiculosEmUso && plano.veiculosEmUso.length > 1
+                      ? `${plano.veiculosEmUso.length} veículos em rota (${plano.veiculosEmUso.map((v) => v.nome).join(', ')})`
+                      : plano.veiculo.nome}{' '}
+                    · gerado em {new Date(plano.geradoEm).toLocaleString('pt-BR')}
                   </span>
                 </div>
-                {modoDemo && (
-                  <span className="chip chip-demo">
-                    <FlaskConical size={14} /> Modo demonstração
-                  </span>
-                )}
               </div>
 
               {opcoesRota.length > 0 && (
@@ -256,8 +241,7 @@ export const App: React.FC = () => {
                   </span>
                   <h3>Nenhum veículo alocado ainda</h3>
                   <p>
-                    Escolha uma unidade da frota abaixo para ver o plano dela, ou envie a base de
-                    pedidos na aba <strong>Home</strong>.
+                    Envie a base de pedidos na aba <strong>Home</strong> para gerar o plano de carga e a alocação da frota.
                   </p>
                 </section>
               )}
@@ -265,6 +249,7 @@ export const App: React.FC = () => {
                 frota={frota}
                 selecionadoId={plano?.veiculo.id}
                 onSelecionar={selecionarVeiculo}
+                veiculosEmUso={plano?.veiculosEmUso}
               />
             </>
           )}
@@ -323,6 +308,13 @@ export const App: React.FC = () => {
 
       {/* fora do .app-layout: a folha de impressão esconde a aplicação e mostra só o relatório */}
       {plano && <RelatorioImpressao plano={plano} />}
+
+      {/* Modal de Erro / Alerta em Pop-up */}
+      <ModalErro
+        aberto={!!erroModal}
+        mensagem={erroModal}
+        onFechar={() => setErroModal(null)}
+      />
     </>
   );
 };
